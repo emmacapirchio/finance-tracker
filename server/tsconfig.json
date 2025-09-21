@@ -54,5 +54,6 @@
     "rootDir": "src",
     "skipLibCheck": true,
     "verbatimModuleSyntax": false
-  }
+  },
+  "include": ["src"]
 }
