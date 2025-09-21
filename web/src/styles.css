@@ -1,0 +1,178 @@
+/* Make widths include padding + border so things fit inside boxes */
+*, *::before, *::after { box-sizing: border-box; }
+
+/* --- One happy light theme (no dark mode) --- */
+html { color-scheme: light; }   /* keep native controls light */
+body {
+  margin: 0;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial;
+  background: #eaf4ff;          /* sky background */
+  color: #0f1d3a;               /* deep navy text */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Theme tokens */
+:root{
+  --bg: #eaf4ff;                /* page */
+  --panel: #ffffff;             /* cards */
+  --panel-border: #d7e6ff;
+  --muted: #58719d;             /* secondary text */
+  --text: #0f1d3a;              /* main text */
+  --primary: #3b86ff;           /* playful blue */
+  --primary-strong: #1e6aff;
+  --highlight: #ffd666;         /* sunny highlight */
+
+  --radius-xl: 16px;
+  --radius: 12px;
+  --shadow: 0 8px 28px rgba(17, 67, 162, .10);
+  --gap: 18px;
+}
+
+/* Layout */
+.container { max-width: 1080px; padding: 28px; margin: 0 auto; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); }
+@media (max-width: 980px){ .grid-2 { grid-template-columns: 1fr; } }
+.section-title { margin: 26px 0 10px; }
+
+/* Headings */
+h1 { font-size: 28px; letter-spacing:.2px; margin: 0 0 10px; }
+h3 { margin: 0 0 12px; font-size: 18px; }
+
+/* Cards */
+.card{
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+
+/* Form */
+label { display:block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+
+.input, .select, .textarea {
+  width: 100%;
+  padding: 12px 14px;
+  background: #f7fbff;
+  color: var(--text);
+  border: 1.5px solid #cfe0ff;
+  border-radius: 12px;
+  outline: none;
+  transition: box-shadow .15s, border-color .15s, background .15s;
+}
+.input:focus, .select:focus, .textarea:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px rgba(59,134,255,.18);
+  background: #ffffff;
+}
+.row { margin-bottom: 12px; }
+.hstack { display:flex; align-items:center; gap:10px; }
+
+/* Buttons */
+.btn{
+  display:inline-flex; align-items:center; gap:8px;
+  padding: 10px 16px;
+  border-radius: 12px;
+  border: 1.5px solid #cfe0ff;
+  background: #f3f8ff;
+  color: var(--text);
+  cursor: pointer;
+  transition: transform .02s, background .15s, border-color .15s, box-shadow .15s;
+}
+.btn:hover{ background:#eef5ff; border-color:#b5cffc; }
+.btn:active{ transform: translateY(1px); }
+.btn[disabled]{ opacity:.55; cursor:not-allowed; }
+
+/* Make primary buttons keep their color on hover */
+.btn.btn-primary {
+  background-color: #007bff; /* or your preferred blue */
+  color: #fff;
+  border: none;
+}
+
+.btn.btn-primary:hover {
+  background-color: #0069d9; /* a slightly darker blue on hover */
+  color: #fff;              /* stays white text */
+}
+
+.btn-primary:active{ transform: translateY(1px); }
+
+/* Badges & alerts */
+.kpi{
+  display:inline-block; padding:8px 12px; border-radius: 999px;
+  background:#f5faff; border:1px solid #d7e6ff; color: var(--muted);
+}
+.kpi strong{ color: var(--text); }
+
+.alert{
+  background:#fff3f3; border:1.5px solid #ffd3d3; color:#7b0c0c;
+  padding: 10px 12px; border-radius: 12px; margin: 10px 0 16px; white-space: pre-wrap;
+}
+
+/* Data blocks */
+pre{
+  background:#f7fbff; border:1.5px solid #d7e6ff; border-radius: var(--radius);
+  padding:12px; margin:0; overflow:auto; max-height:180px; font-size: 13px;
+}
+
+/* Tables */
+table { width:100%; border-collapse: collapse; }
+th, td { padding: 12px; border-bottom: 1px solid #e7efff; }
+th { text-align:left; color: var(--muted); font-weight: 600; }
+tbody tr:nth-child(odd){ background:#f9fbff; }
+
+/* Lists in cards */
+.card ul{ margin:6px 0 0; padding-left:18px; }
+.card li{ padding:4px 0; color: var(--muted); }
+
+/* Fun accent underline for section headers */
+.section-title h3::after{
+  content:""; display:block; height:4px; width:56px; margin-top:6px;
+  background: linear-gradient(90deg, var(--highlight), var(--primary));
+  border-radius: 999px;
+}
+
+/* Keep top toolbar controls compact */
+.toolbar .input { width: 280px; max-width: 100%; }
+
+/* Inside forms, don’t let fields run the full card width */
+.card .input,
+.card .select,
+.card .textarea { max-width: 520px; }
+
+/* Row with “New merchant name” should flex nicely */
+.inline-add { display:flex; gap:10px; align-items:center; }
+.inline-add .input { flex: 1 1 auto; max-width: none; }
+.inline-add .btn { white-space: nowrap; }
+
+/* Slightly smaller focus halo so it doesn't look like a huge pill */
+.input:focus,
+.select:focus,
+.textarea:focus {
+  box-shadow: 0 0 0 3px rgba(59,134,255,.16);
+}
+
+/* Buttons should hug their content, not stretch */
+.btn, .btn-primary { width: auto; }
+
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+  background: #eaf4ff;
+}
+
+/* Absolute kill-switch: paint a fixed layer under everything */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: #eaf4ff;
+  z-index: -1;              /* sits behind all content */
+}
+
+/* Optional: stop rubber-band overscroll from revealing system bg */
+html, body {
+  overscroll-behavior: none;
+}
