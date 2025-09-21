@@ -31,12 +31,20 @@ app.use(express.json());
 app.use(cookieParser());
 
 // --- helper: month range from "YYYY-MM" ---
+// --- helper: strict month range from "YYYY-MM" ---
 function monthRange(yyyyMm: string) {
+  if (!/^\d{4}-\d{2}$/.test(yyyyMm)) {
+    throw Object.assign(new Error('Invalid month. Use YYYY-MM.'), { status: 400 });
+  }
   const [y, m] = yyyyMm.split('-').map(Number);
+  if (m < 1 || m > 12) {
+    throw Object.assign(new Error('Invalid month. Use YYYY-MM.'), { status: 400 });
+  }
   const start = new Date(Date.UTC(y, m - 1, 1));
   const end   = new Date(Date.UTC(m === 12 ? y + 1 : y, m === 12 ? 0 : m, 1));
   return { start, end };
 }
+
 
 // add near other validators
 const billCreateSchema = z.object({
@@ -111,10 +119,16 @@ app.post('/api/logout', async (_req, res) => {
 app.get('/api/me', requireAuth, async (req: any, res) => {
   const userId = req.userId;
   if (!userId) return res.status(401).json({ error: 'Unauthenticated' });
-  const u = await prisma.users.findUnique({ where: { id: userId } });
+
+  const u = await prisma.users.findUnique({
+    where: { id: userId },
+    select: { id: true, email: true, username: true },
+  });
+
   if (!u) return res.status(404).json({ error: 'Not found' });
   res.json({ id: u.id, email: u.email, username: u.username });
 });
+
 
 /* =========================
    Settings
@@ -223,13 +237,18 @@ app.post('/api/income', requireAuth, async (req: any, res) => {
 });
 
 app.get('/api/income', requireAuth, async (req: any, res) => {
-  const month = String(req.query.month || '');
-  const { start, end } = monthRange(month);
-  const rows = await prisma.income.findMany({
-    where: { user_id: req.userId, date: { gte: start, lt: end } },
-    orderBy: { date: 'asc' }
-  });
-  res.json(rows);
+  try {
+    const month = String(req.query.month || '');
+    const { start, end } = monthRange(month);
+    const rows = await prisma.income.findMany({
+      where: { user_id: req.userId, date: { gte: start, lt: end } },
+      orderBy: { date: 'asc' }
+    });
+    res.json(rows);
+  } catch (e: any) {
+    const status = e?.status ?? 500;
+    res.status(status).json({ error: e?.message || 'Failed to fetch income' });
+  }
 });
 
 /* =========================
@@ -257,13 +276,18 @@ app.post('/api/transactions', requireAuth, async (req: any, res) => {
 });
 
 app.get('/api/transactions', requireAuth, async (req: any, res) => {
-  const month = String(req.query.month || '');
-  const { start, end } = monthRange(month);
-  const rows = await prisma.transactions.findMany({
-    where: { user_id: req.userId, date: { gte: start, lt: end } },
-    orderBy: { date: 'asc' }
-  });
-  res.json(rows);
+  try {
+    const month = String(req.query.month || '');
+    const { start, end } = monthRange(month);
+    const rows = await prisma.transactions.findMany({
+      where: { user_id: req.userId, date: { gte: start, lt: end } },
+      orderBy: { date: 'asc' }
+    });
+    res.json(rows);
+  } catch (e: any) {
+    const status = e?.status ?? 500;
+    res.status(status).json({ error: e?.message || 'Failed to fetch transactions' });
+  }
 });
 
 /* =========================
@@ -282,62 +306,72 @@ app.get('/api/overview', requireAuth, async (_req, res) => {
    Forecast to Dec 2027
    ========================= */
 
+// /api/forecast: robust, no DB view required
 app.get('/api/forecast', requireAuth, async (req: any, res) => {
-  const startKey = String(req.query.start || new Date().toISOString().slice(0,7)); // e.g., "2025-09"
-
-  const a = await prisma.assumptions.findUnique({ where: { user_id: req.userId } });
-  if (!a) return res.status(400).json({ error: 'Set assumptions first (current savings & as_of_date).' });
-
-  const startMonth = new Date(Date.UTC(a.as_of_date.getUTCFullYear(), a.as_of_date.getUTCMonth(), 1));
-  const startSavings = a.current_savings_cents;
-
-  const toKey = (d: Date) => `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}`;
-
-  // 🔧 Typed query + no `.then` → no implicit-any on rows/r
-  type OverviewRow = {
-    month_key: string;
-    income: number;
-    fixed_expenses: number;
-    flexible_expenses: number;
-  };
-
-  const rows: OverviewRow[] = await prisma.$queryRaw<OverviewRow[]>
-  `SELECT month_key, income, fixed_expenses, flexible_expenses
-    FROM app.monthly_overview
-    WHERE month_key >= ${toKey(startMonth)} AND month_key <= '2027-12'
-    ORDER BY month_key`;
-
-  const viewRows: { month_key: string; net_change: number }[] = rows.map((r) => ({
-    month_key: r.month_key,
-    net_change: Number(r.income) - Number(r.fixed_expenses) - Number(r.flexible_expenses),
-  }));
-
-  const netByMonth = new Map<string, number>();
-  for (const r of viewRows) netByMonth.set(r.month_key, Math.round(Number(r.net_change) * 100));
-
-  const first = (() => {
-    const s = startKey.split('-').map(Number);
-    const d = new Date(Date.UTC(s[0], s[1]-1, 1));
-    return d < startMonth ? startMonth : d;
-  })();
-  const end = new Date(Date.UTC(2027, 11, 1)); // Dec 2027
-
-  const out: { month_key: string; net_change_cents: number; savings_cents: number }[] = [];
-  let running = startSavings;
-
-  let cursor = new Date(startMonth);
-  while (cursor <= end) {
-    const key = toKey(cursor);
-    const net = netByMonth.get(key) ?? 0;
-    running += net;
-    if (cursor >= first) {
-      out.push({ month_key: key, net_change_cents: net, savings_cents: running });
+  try {
+    // start key defaults to current UTC month if not provided
+    const startKey = String(req.query.start || new Date().toISOString().slice(0,7)); // "YYYY-MM"
+    if (!/^\d{4}-\d{2}$/.test(startKey)) {
+      return res.status(400).json({ error: 'start must be YYYY-MM' });
     }
-    cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth()+1, 1));
-  }
 
-  res.json(out);
+    // assumptions required
+    const a = await prisma.assumptions.findUnique({ where: { user_id: req.userId } });
+    if (!a) return res.status(400).json({ error: 'Set assumptions first (current savings & as_of_date).' });
+
+    const toKey = (d: Date) => `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}`;
+
+    // compute month list from max(as_of_date, startKey) through Dec 2027
+    const asOf = new Date(Date.UTC(a.as_of_date.getUTCFullYear(), a.as_of_date.getUTCMonth(), 1));
+    const startParts = startKey.split('-').map(Number);
+    const requested = new Date(Date.UTC(startParts[0], startParts[1]-1, 1));
+    const first = requested < asOf ? asOf : requested;
+    const end = new Date(Date.UTC(2027, 11, 1)); // Dec 2027
+
+    // Query aggregates per month via SQL (safe, no custom view needed)
+    // Income per month
+    const incRows: { month_key: string; cents: bigint }[] = await prisma.$queryRaw`
+      SELECT to_char(date, 'YYYY-MM') AS month_key, SUM(amount_cents)::bigint AS cents
+      FROM income
+      WHERE user_id = ${req.userId}::uuid
+      GROUP BY 1
+    `;
+    // Spending per month (transactions)
+    const spendRows: { month_key: string; cents: bigint }[] = await prisma.$queryRaw`
+      SELECT to_char(date, 'YYYY-MM') AS month_key, SUM(amount_cents)::bigint AS cents
+      FROM transactions
+      WHERE user_id = ${req.userId}::uuid
+      GROUP BY 1
+    `;
+
+    const incomeByMonth = new Map<string, number>();
+    for (const r of incRows) incomeByMonth.set(r.month_key, Number(r.cents));
+
+    const spendByMonth = new Map<string, number>();
+    for (const r of spendRows) spendByMonth.set(r.month_key, Number(r.cents));
+
+    // Walk months and build the forecast from assumptions.current_savings_cents
+    const out: { month_key: string; net_change_cents: number; savings_cents: number }[] = [];
+    let running = a.current_savings_cents;
+
+    let cursor = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), 1));
+    while (cursor <= end) {
+      const key = toKey(cursor);
+      const inc  = incomeByMonth.get(key) ?? 0;
+      const exp  = spendByMonth.get(key) ?? 0;
+      const net  = inc - exp; // cents
+      running += net;
+      out.push({ month_key: key, net_change_cents: net, savings_cents: running });
+      cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth()+1, 1));
+    }
+
+    res.json(out);
+  } catch (e: any) {
+    // If something DB-specific goes wrong, don’t leak raw error; give a stable message.
+    res.status(500).json({ error: 'Failed to build forecast' });
+  }
 });
+
 
 /* =========================
    Bills (recurring)
@@ -439,28 +473,34 @@ app.patch('/api/bills/:id', requireAuth, async (req: any, res) => {
    ========================= */
 
 app.get('/api/summary', requireAuth, async (req: any, res) => {
-  const month = String(req.query.month || '');
-  const { start, end } = monthRange(month);
+  try {
+    const month = String(req.query.month || '');
+    const { start, end } = monthRange(month);
 
-  const [inc, spend] = await Promise.all([
-    prisma.income.aggregate({
-      _sum: { amount_cents: true },
-      where: { user_id: req.userId, date: { gte: start, lt: end } }
-    }),
-    prisma.transactions.aggregate({
-      _sum: { amount_cents: true },
-      where: { user_id: req.userId, date: { gte: start, lt: end } }
-    })
-  ]);
+    const [inc, spend] = await Promise.all([
+      prisma.income.aggregate({
+        _sum: { amount_cents: true },
+        where: { user_id: req.userId, date: { gte: start, lt: end } }
+      }),
+      prisma.transactions.aggregate({
+        _sum: { amount_cents: true },
+        where: { user_id: req.userId, date: { gte: start, lt: end } }
+      })
+    ]);
 
-  const incomeCents = inc._sum.amount_cents ?? 0;
-  const spendCents  = spend._sum.amount_cents ?? 0;
-  res.json({
-    month,
-    income: incomeCents / 100,
-    spending: spendCents / 100,
-    net: (incomeCents - spendCents) / 100
-  });
+    const incomeCents = inc._sum.amount_cents ?? 0;
+    const spendCents  = spend._sum.amount_cents ?? 0;
+
+    res.json({
+      month,
+      income: incomeCents / 100,
+      spending: spendCents / 100,
+      net: (incomeCents - spendCents) / 100
+    });
+  } catch (e: any) {
+    const status = e?.status ?? 500;
+    res.status(status).json({ error: e?.message || 'Failed to load summary' });
+  }
 });
 
 const port = Number(process.env.PORT || 4000);
