@@ -1,5 +1,5 @@
 // server/src/routes/auth.ts
-import { Router } from 'express';
+import { Router, Request, Response } from 'express';
 import { prisma } from '../prisma';
 import {
   createUser,
@@ -10,82 +10,74 @@ import {
   requireAuth,
 } from '../auth';
 
+// tiny async wrapper so errors hit your errorHandler
+const ah =
+  <T extends (req: Request, res: Response) => Promise<unknown>>(fn: T) =>
+  (req: Request, res: Response) =>
+    fn(req, res).catch((err) => {
+      // let your centralized error middleware handle it
+      throw err;
+    });
+
 const router = Router();
 
 /**
  * POST /auth/register
- * Create a new user. Email/password are optional for now,
- * but if both are provided a password hash will be stored.
+ * Create a new user. Email/password are optional for now.
  */
-router.post('/register', async (req, res) => {
-  const { email, password } = req.body ?? {};
-  try {
-    // createUser() already handles nullable email/password
+router.post(
+  '/register',
+  ah(async (req, res) => {
+    const { email, password } = (req.body ?? {}) as { email?: string; password?: string };
     const user = await createUser(email ?? null, password ?? '');
     const token = signToken(user.id);
     setAuthCookie(res, token);
-    res.json({
-      id: user.id,
-      email: user.email,
-      username: user.username,
-    });
-  } catch (err) {
-    console.error('register error', err);
-    res.status(500).json({ error: 'Failed to register user' });
-  }
-});
+    res.json({ id: user.id, email: user.email, username: user.username });
+  })
+);
 
 /**
  * POST /auth/login
- * Logs a user in if credentials are provided and valid.
- * If email/password are missing, returns 400.
  */
-router.post('/login', async (req, res) => {
-  const { email, password } = req.body ?? {};
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password required' });
-  }
-  try {
+router.post(
+  '/login',
+  ah(async (req, res) => {
+    const { email, password } = (req.body ?? {}) as { email?: string; password?: string };
+    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+
     const user = await verifyUser(email, password);
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
 
     const token = signToken(user.id);
     setAuthCookie(res, token);
-    res.json({
-      id: user.id,
-      email: user.email,
-      username: user.username,
-    });
-  } catch (err) {
-    console.error('login error', err);
-    res.status(500).json({ error: 'Failed to log in' });
-  }
-});
+    res.json({ id: user.id, email: user.email, username: user.username });
+  })
+);
 
 /**
  * POST /auth/logout
- * Clears the auth cookie.
  */
-router.post('/logout', async (_req, res) => {
-  clearAuthCookie(res);
-  res.json({ ok: true });
-});
+router.post(
+  '/logout',
+  ah(async (_req, res) => {
+    clearAuthCookie(res);
+    res.json({ ok: true });
+  })
+);
 
 /**
  * GET /auth/me
- * Returns the current user if the cookie is valid.
  */
-router.get('/me', requireAuth, async (req: any, res) => {
-  try {
+router.get(
+  '/me',
+  requireAuth,
+  ah(async (req: Request & { userId: string }, res) => {
     const user = await prisma.users.findUnique({
       where: { id: req.userId },
       select: { id: true, email: true, username: true },
     });
     res.json(user);
-  } catch (err) {
-    console.error('me error', err);
-    res.status(500).json({ error: 'Failed to fetch user' });
-  }
-});
+  })
+);
 
 export default router;

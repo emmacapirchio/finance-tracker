@@ -1,3 +1,4 @@
+// src/pages/Settings.jsx
 import { useEffect, useState } from 'react';
 import { changePassword, getAssumptions, updateAssumptions } from '../api';
 

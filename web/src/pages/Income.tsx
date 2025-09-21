@@ -1,3 +1,4 @@
+// src/pages/Income.tsx
 import { useEffect, useState } from 'react';
 import dayjs from 'dayjs';
 import { getCategories, addIncome, listIncome } from '../api';

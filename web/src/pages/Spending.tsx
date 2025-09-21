@@ -1,3 +1,4 @@
+// src/pages/Spending.tsx
 import { useEffect, useState } from 'react';
 import dayjs from 'dayjs';
 import { getCategories, getMerchants, addTxn, listTxns } from '../api';

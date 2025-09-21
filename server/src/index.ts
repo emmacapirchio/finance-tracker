@@ -6,6 +6,9 @@ import { z } from 'zod';
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import { withRequestId, log } from './middleware/logger';  // ✅ add this
+import { errorHandler } from './middleware/errors';        // ✅ add this later
+import forecastRoutes from './routes/forecast';
 import bcrypt from 'bcryptjs';
 import { prisma } from './prisma';
 import { incomeSchema, txnSchema, changePasswordSchema, assumptionsSchema } from './validators';
@@ -19,6 +22,7 @@ import {
 } from './auth';
 
 const app = express();
+app.use(withRequestId);
 app.use(cors({
   origin: process.env.WEB_ORIGIN || 'http://localhost:5173',
   credentials: true, // allow cookies
@@ -406,6 +410,27 @@ app.delete('/api/bills/:id', requireAuth, async (req: any, res) => {
   res.json({ ok: true });
 });
 
+// Update the type of a bill (e.g., mark subscription back to bill)
+app.patch('/api/bills/:id', requireAuth, async (req: any, res) => {
+  const { type } = req.body;
+  if (type !== 'bill' && type !== 'subscription') {
+    return res.status(400).json({ error: 'type must be "bill" or "subscription"' });
+  }
+
+  try {
+    const updated = await prisma.bills.updateMany({
+      where: { id: req.params.id, user_id: req.userId },
+      data: { type },
+    });
+    if (updated.count === 0) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('PATCH /api/bills/:id error', err);
+    res.status(500).json({ error: 'Failed to update bill type' });
+  }
+});
+
+
 
 /* =========================
    Monthly totals for dashboard tiles
@@ -437,4 +462,5 @@ app.get('/api/summary', requireAuth, async (req: any, res) => {
 });
 
 const port = Number(process.env.PORT || 4000);
+app.use(errorHandler);
 app.listen(port, () => console.log(`API running at http://localhost:${port}`));

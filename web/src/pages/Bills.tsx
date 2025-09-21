@@ -1,3 +1,4 @@
+// src/pages/Bills.tsx
 import { useEffect, useState } from 'react';
 
 /* ---------- Types ---------- */
@@ -56,7 +57,7 @@ export default function Bills() {
     setErr(null);
     try {
         const userId = localStorage.getItem('userId')!;
-        const r = await fetch('/api/bills?type=all&userId=${userId}', { credentials: 'include' });
+        const r = await fetch(`/api/bills?type=all&userId=${userId}`, { credentials: 'include' });
         if (!r.ok) throw new Error(`Load failed: ${r.status}`);
         const data: BillRow[] = await r.json();
         setRows(data);

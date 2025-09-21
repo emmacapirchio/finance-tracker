@@ -1,4 +1,6 @@
+// src/pages/Subscriptions.tsx
 import { useEffect, useMemo, useState } from 'react';
+import { listBills, updateBill } from '../api';
 
 type Cadence = 'monthly' | 'annual' | 'weekly' | 'biweekly' | 'quarterly' | 'once';
 type Row = {
@@ -14,7 +16,7 @@ function dollars(cents: number) {
   return (cents / 100).toFixed(2);
 }
 
-// normalize mixed cadences to monthly
+// Normalize mixed cadences to monthly cents
 function monthlyFrom(cents: number, cadence: Cadence) {
   switch (cadence) {
     case 'monthly':   return cents;
@@ -31,16 +33,14 @@ export default function Subscriptions() {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
     setErr(null);
     try {
-      const userId = localStorage.getItem('userId');
-      const url = `/api/subscriptions${userId ? `?userId=${userId}` : ''}`;
-      const r = await fetch(url, { credentials: 'include' });
-      if (!r.ok) throw new Error(`Load failed: ${r.status}`);
-      setRows(await r.json());
+      const data: Row[] = await listBills('subscription');
+      setRows(data);
     } catch (e: any) {
       setErr(e?.message ?? 'Failed to load subscriptions');
     } finally {
@@ -48,24 +48,36 @@ export default function Subscriptions() {
     }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        setLoading(true);
+        const data: Row[] = await listBills('subscription');
+        if (active) setRows(data);
+      } catch (e: any) {
+        if (active) setErr(e?.message ?? 'Failed to load subscriptions');
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => { active = false; };
+  }, []);
 
-  // optional: reclassify back to bill
+  // Reclassify back to bill (optimistic)
   async function markAsBill(id: string) {
     setErr(null);
+    setUpdatingId(id);
     const prev = rows;
-    setRows(rs => rs.filter(r => r.id !== id)); // optimistic
+    setRows(rs => rs.filter(r => r.id !== id)); // optimistic removal from subscriptions
     try {
-      const r = await fetch(`/api/bills/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ type: 'bill' }),
-      });
-      if (!r.ok) throw new Error(`Update failed: ${r.status}`);
+      await updateBill(id, { type: 'bill' });
+      // success → nothing else to do (it’s no longer a subscription)
     } catch (e: any) {
       setErr(e?.message ?? 'Failed to update');
-      setRows(prev); // rollback
+      setRows(prev); // rollback on failure
+    } finally {
+      setUpdatingId(null);
     }
   }
 
@@ -103,12 +115,22 @@ export default function Subscriptions() {
                   <td>{r.cadence}{r.due_day ? ` • due ${r.due_day}` : ''}</td>
                   <td style={{ textAlign: 'right' }}>${dollars(r.amount_cents)}</td>
                   <td style={{ textAlign: 'right' }}>
-                    <button className="btn" onClick={() => markAsBill(r.id)}>Mark as bill</button>
+                    <button
+                      className="btn"
+                      onClick={() => markAsBill(r.id)}
+                      disabled={updatingId === r.id}
+                    >
+                      {updatingId === r.id ? 'Updating…' : 'Mark as bill'}
+                    </button>
                   </td>
                 </tr>
               ))}
               {rows.length === 0 && !loading && (
-                <tr><td colSpan={4} style={{ padding: 12, opacity: 0.7 }}>No subscriptions yet.</td></tr>
+                <tr>
+                  <td colSpan={4} style={{ padding: 12, opacity: 0.7 }}>
+                    No subscriptions yet.
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>

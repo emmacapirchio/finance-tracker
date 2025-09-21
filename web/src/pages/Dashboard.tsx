@@ -1,3 +1,4 @@
+// src/pages/Dashboard.tsx
 import { useEffect, useState } from 'react';
 import dayjs from 'dayjs';
 import { listIncome, listTxns, getSummary, getForecast } from '../api';

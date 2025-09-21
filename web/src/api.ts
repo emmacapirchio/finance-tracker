@@ -1,13 +1,28 @@
+// src/api.ts
 import axios from 'axios';
 
-// Use VITE_API_ORIGIN in production; fallback to relative '/api' in dev
+// In dev, we rely on Vite proxy and use relative '/api'.
+// In prod, set VITE_API_ORIGIN (e.g. https://your-frontend-host) and we'll call `${ORIGIN}/api`.
 const ORIGIN = import.meta.env.VITE_API_ORIGIN ?? '';
-const BASE   = ORIGIN ? `${ORIGIN.replace(/\/+$/, '')}/api` : '/api';
+const BASE = ORIGIN ? `${ORIGIN.replace(/\/+$/, '')}/api` : '/api';
 
 export const api = axios.create({
   baseURL: BASE,
-  withCredentials: true,
+  withCredentials: true, // send/receive the fin_auth cookie
 });
+
+// Make API errors readable across the app
+api.interceptors.response.use(
+  (r) => r,
+  (err) => {
+    const msg =
+      err?.response?.data?.error ??
+      err?.response?.data?.message ??
+      err?.message ??
+      'Request failed';
+    return Promise.reject(new Error(msg));
+  }
+);
 
 /* ---------- Lookups ---------- */
 export async function getCategories() {
@@ -18,6 +33,17 @@ export async function getMerchants() {
 }
 export async function addMerchant(name: string) {
   return (await api.post('/merchants', { name })).data;
+}
+
+/* ---------- Bills ---------- */
+export async function listBills(type: 'bill' | 'subscription' | 'all' = 'all') {
+  return (await api.get('/bills', { params: { type } })).data;
+}
+export async function updateBill(
+  id: string,
+  patch: Partial<{ type: 'bill' | 'subscription' }>
+) {
+  return (await api.patch(`/bills/${id}`, patch)).data;
 }
 
 /* ---------- Income ---------- */
@@ -45,13 +71,15 @@ export async function getForecast(start: string) {
 }
 
 /* ---------- Monthly Summary ---------- */
-export async function getSummary(month: string): Promise<{month: string; income: number; spending: number; net: number}> {
+export async function getSummary(
+  month: string
+): Promise<{ month: string; income: number; spending: number; net: number }> {
   return (await api.get('/summary', { params: { month } })).data;
 }
 
 /* ---------- Authentication ---------- */
 export async function me() {
-  return (await api.get('/me')).data;  // { id, email, username }
+  return (await api.get('/me')).data; // { id, email, username }
 }
 export async function login(email: string, password: string) {
   return (await api.post('/login', { email, password })).data;
@@ -64,7 +92,10 @@ export async function logout() {
 }
 
 /* ---------- Settings ---------- */
-export async function changePassword(currentPassword: string | undefined, newPassword: string) {
+export async function changePassword(
+  currentPassword: string | undefined,
+  newPassword: string
+) {
   return (await api.post('/settings/password', { currentPassword, newPassword })).data;
 }
 export async function getAssumptions() {
@@ -72,7 +103,7 @@ export async function getAssumptions() {
 }
 export async function updateAssumptions(payload: {
   currentSavings: number;
-  asOfDate: string;   // YYYY-MM-DD
+  asOfDate: string; // YYYY-MM-DD
   apr?: number;
   inflation?: number;
 }) {
