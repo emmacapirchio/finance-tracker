@@ -332,14 +332,15 @@ app.get('/api/forecast', requireAuth, async (req: any, res) => {
     // Income per month
     const incRows: { month_key: string; cents: bigint }[] = await prisma.$queryRaw`
       SELECT to_char(date, 'YYYY-MM') AS month_key, SUM(amount_cents)::bigint AS cents
-      FROM income
+      FROM "app"."income"
       WHERE user_id = ${req.userId}::uuid
       GROUP BY 1
     `;
+
     // Spending per month (transactions)
     const spendRows: { month_key: string; cents: bigint }[] = await prisma.$queryRaw`
       SELECT to_char(date, 'YYYY-MM') AS month_key, SUM(amount_cents)::bigint AS cents
-      FROM transactions
+      FROM "app"."transactions"
       WHERE user_id = ${req.userId}::uuid
       GROUP BY 1
     `;
