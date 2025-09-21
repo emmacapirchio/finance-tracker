@@ -1,21 +1,31 @@
+// import axios from 'axios';
+
+// const ORIGIN = import.meta.env.VITE_API_ORIGIN ?? 'http://localhost:4000';
+
+// // helpers to join cleanly
+// const j = (base: string, p: string) => `${base.replace(/\/+$/, '')}/${p.replace(/^\/+/, '')}`;
+
+// // One client for app APIs
+// export const api = axios.create({
+//   baseURL: j(ORIGIN, '/api'),
+//   withCredentials: true,
+// });
+
 import axios from 'axios';
 
-const ORIGIN = import.meta.env.VITE_API_ORIGIN ?? 'http://localhost:4000';
+const ORIGIN = import.meta.env.VITE_API_ORIGIN ?? ''; // '' => relative in dev (Vite proxy)
+const BASE   = ORIGIN ? `${ORIGIN.replace(/\/+$/, '')}/api` : '/api';
 
-// helpers to join cleanly
-const j = (base: string, p: string) => `${base.replace(/\/+$/, '')}/${p.replace(/^\/+/, '')}`;
-
-// One client for app APIs
 export const api = axios.create({
-  baseURL: j(ORIGIN, '/api'),
+  baseURL: BASE,
   withCredentials: true,
 });
 
 // A second client for auth endpoints
-export const auth = axios.create({
-  baseURL: j(ORIGIN, '/auth'),
-  withCredentials: true,
-});
+// export const auth = axios.create({
+//   baseURL: j(ORIGIN, '/auth'),
+//   withCredentials: true,
+// });
 
 /* ---------- lookups (unchanged, use /api) ---------- */
 export async function getCategories() { return (await api.get('/categories')).data; }
@@ -41,16 +51,16 @@ export async function getSummary(month: string): Promise<{month: string; income:
 
 /* ---------- auth (SWITCHED to /auth) ---------- */
 export async function me() {
-  return (await auth.get('/me')).data; // { id, email, username }
+  return (await api.get('/me')).data; // { id, email, username }
 }
 export async function login(email: string, password: string) {
-  return (await auth.post('/login', { email, password })).data;
+  return (await api.post('/login', { email, password })).data;
 }
 export async function register(email: string, password: string) {
-  return (await auth.post('/register', { email, password })).data;
+  return (await api.post('/register', { email, password })).data;
 }
 export async function logout() {
-  return (await auth.post('/logout')).data;
+  return (await api.post('/logout')).data;
 }
 
 /* ---------- settings (unchanged) ---------- */
