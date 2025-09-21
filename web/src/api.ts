@@ -1,10 +1,24 @@
 import axios from 'axios';
 
-// Use a relative base so it works behind the Vite dev proxy AND in production
+// In production, use the absolute API origin from Netlify env.
+// In local dev, fall back to the relative '/api' (so Vite proxy can work).
+const ORIGIN = import.meta.env.VITE_API_ORIGIN; // e.g. https://your-api.onrender.com
+
+function join(base: string, path: string) {
+  return `${base.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
+}
+
 export const api = axios.create({
-  baseURL: '/api',
+  baseURL: ORIGIN ? join(ORIGIN, '/api') : '/api',
   withCredentials: true,
 });
+
+
+// Use a relative base so it works behind the Vite dev proxy AND in production
+// export const api = axios.create({
+//   baseURL: '/api',
+//   withCredentials: true,
+// });
 
 // lookups
 export async function getCategories() { return (await api.get('/categories')).data; }
