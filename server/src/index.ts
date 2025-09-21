@@ -109,7 +109,9 @@ app.post('/api/logout', async (_req, res) => {
 });
 
 app.get('/api/me', requireAuth, async (req: any, res) => {
-  const u = await prisma.users.findUnique({ where: { id: req.userId } });
+  const userId = req.userId;
+  if (!userId) return res.status(401).json({ error: 'Unauthenticated' });
+  const u = await prisma.users.findUnique({ where: { id: userId } });
   if (!u) return res.status(404).json({ error: 'Not found' });
   res.json({ id: u.id, email: u.email, username: u.username });
 });

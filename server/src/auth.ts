@@ -1,5 +1,5 @@
 // server/src/auth.ts
-import type { Request, Response, NextFunction } from 'express';
+import type { Request, Response, NextFunction, RequestHandler } from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { prisma } from './prisma';
@@ -35,21 +35,20 @@ export function clearAuthCookie(res: Response) {
 }
 
 // ---- middleware ----
-export async function requireAuth(
-  req: Request & { userId?: string },
-  res: Response,
-  next: NextFunction
-) {
+// Use RequestHandler so Express types line up, and avoid throwing 500s when token is bad.
+export const requireAuth: RequestHandler = (req, res, next) => {
   try {
     const token = req.cookies?.[COOKIE_NAME];
     if (!token) return res.status(401).json({ error: 'Unauthenticated' });
+
     const data = jwt.verify(token, JWT_SECRET) as JwtPayload;
-    req.userId = data.uid;
-    next();
+    // relies on express type augmentation (req.userId?: string)
+    (req as any).userId = data.uid; // safe even if you haven’t added the augmentation yet
+    return next();
   } catch {
     return res.status(401).json({ error: 'Unauthenticated' });
   }
-}
+};
 
 // ---- user helpers (matches your schema: model `users`, snake_case fields) ----
 /**
