@@ -12,50 +12,40 @@ const qSchema = z.object({
 
 const router = Router();
 
-/**
- * GET /forecast?start=YYYY-MM&months=12
- * Returns summed income/expense cents over the given period.
- */
-router.get(
-  '/',
-  requireAuth,
-  async (req: Request & { userId: string }, res: Response) => {
-    const { start, months } = qSchema.parse(req.query);
-    const traceId = (req as any).traceId;
+router.get('/', requireAuth, async (req: Request, res: Response) => {
+  const { start, months } = qSchema.parse(req.query);
+  const traceId = req.traceId;
 
-    const [y, m] = start.split('-').map(Number);
-    const startDate = new Date(Date.UTC(y, m - 1, 1));
-    const endDate = new Date(Date.UTC(y, m - 1 + months, 1));
+  const [y, m] = start.split('-').map(Number);
+  const startDate = new Date(Date.UTC(y, m - 1, 1));
+  const endDate = new Date(Date.UTC(y, m - 1 + months, 1));
 
-    log.info({ traceId, route: 'GET /forecast', userId: req.userId, start, months }, 'Forecast request');
+  log.info({ traceId, route: 'GET /forecast', userId: req.userId, start, months }, 'Forecast request');
 
-    // Pull transactions and join categories to infer income vs expense
-    const txns = await prisma.transactions.findMany({
-      where: {
-        user_id: req.userId,
-        date: { gte: startDate, lt: endDate },
-      },
-      select: {
-        amount_cents: true,
-        categories: { select: { kind: true } },
-      },
-    });
+  const txns = await prisma.transactions.findMany({
+    where: {
+      user_id: req.userId!,
+      date: { gte: startDate, lt: endDate },
+    },
+    select: {
+      amount_cents: true,
+      categories: { select: { kind: true } },
+    },
+  });
 
-    // Sum based on category.kind
-    let income_cents = 0;
-    let expense_cents = 0;
-    for (const t of txns) {
-      if (t.categories?.kind === 'income') income_cents += t.amount_cents;
-      else expense_cents += t.amount_cents;
-    }
-
-    res.json({
-      traceId,
-      start,
-      months,
-      totals: { income_cents, expense_cents },
-    });
+  let income_cents = 0;
+  let expense_cents = 0;
+  for (const t of txns) {
+    if (t.categories?.kind === 'income') income_cents += t.amount_cents;
+    else expense_cents += t.amount_cents;
   }
-);
+
+  res.json({
+    traceId,
+    start,
+    months,
+    totals: { income_cents, expense_cents },
+  });
+});
 
 export default router;

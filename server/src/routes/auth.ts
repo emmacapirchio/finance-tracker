@@ -71,13 +71,13 @@ router.post(
 router.get(
   '/me',
   requireAuth,
-  ah(async (req: Request & { userId: string }, res) => {
+  async (req: Request, res: Response) => {
     const user = await prisma.users.findUnique({
-      where: { id: req.userId },
+      where: { id: req.userId! },                     // req.userId is typed optional; use !
       select: { id: true, email: true, username: true },
     });
     res.json(user);
-  })
+  }
 );
 
 export default router;
