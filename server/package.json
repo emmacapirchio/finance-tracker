@@ -2,14 +2,15 @@
   "name": "server",
   "version": "1.0.0",
   "main": "index.js",
-  "scripts": {
-    "dev": "nodemon --watch src --exec ts-node src/index.ts",
-    "start": "node dist/index.js"
-  },
+  "description": "",
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx watch src/index.ts"
+  },
   "dependencies": {
     "@prisma/client": "^6.16.2",
     "bcryptjs": "^3.0.2",
@@ -31,11 +32,5 @@
     "ts-node": "^10.9.2",
     "tsx": "^4.20.5",
     "typescript": "^5.9.2"
-  },
-  "scripts": {
-    "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "tsx watch src/index.ts"
   }
 }
-
