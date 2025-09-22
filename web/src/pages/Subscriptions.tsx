@@ -39,7 +39,7 @@ export default function Subscriptions() {
     setLoading(true);
     setErr(null);
     try {
-      const data: Row[] = await listBills('subscription');
+      const data: Row[] = await listBills('subscription'); // cookie-based auth
       setRows(data);
     } catch (e: any) {
       setErr(e?.message ?? 'Failed to load subscriptions');
@@ -48,31 +48,17 @@ export default function Subscriptions() {
     }
   }
 
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        setLoading(true);
-        const data: Row[] = await listBills('subscription');
-        if (active) setRows(data);
-      } catch (e: any) {
-        if (active) setErr(e?.message ?? 'Failed to load subscriptions');
-      } finally {
-        if (active) setLoading(false);
-      }
-    })();
-    return () => { active = false; };
-  }, []);
+  useEffect(() => { load(); }, []);
 
   // Reclassify back to bill (optimistic)
   async function markAsBill(id: string) {
     setErr(null);
     setUpdatingId(id);
     const prev = rows;
-    setRows(rs => rs.filter(r => r.id !== id)); // optimistic removal from subscriptions
+    setRows(rs => rs.filter(r => r.id !== id)); // optimistic removal
     try {
       await updateBill(id, { type: 'bill' });
-      // success → nothing else to do (it’s no longer a subscription)
+      // success: row is no longer a subscription, so we keep it removed
     } catch (e: any) {
       setErr(e?.message ?? 'Failed to update');
       setRows(prev); // rollback on failure

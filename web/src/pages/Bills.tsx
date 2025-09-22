@@ -56,17 +56,18 @@ export default function Bills() {
     setLoading(true);
     setErr(null);
     try {
-        const userId = localStorage.getItem('userId')!;
-        const r = await fetch(`/api/bills?type=all&userId=${userId}`, { credentials: 'include' });
-        if (!r.ok) throw new Error(`Load failed: ${r.status}`);
-        const data: BillRow[] = await r.json();
-        setRows(data);
+      // No userId: server reads the user from the cookie
+      const r = await fetch('/api/bills?type=all', { credentials: 'include' });
+      if (!r.ok) throw new Error(`Load failed: ${r.status}`);
+      const data: BillRow[] = await r.json();
+      setRows(data);
     } catch (e: any) {
       setErr(e?.message ?? 'Failed to load bills');
     } finally {
       setLoading(false);
     }
   }
+
 
   useEffect(() => { load(); }, []);
 
