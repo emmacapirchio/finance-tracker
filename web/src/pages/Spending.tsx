@@ -230,78 +230,110 @@ export default function Spending() {
       {/* Spending list */}
       <div className="card">
         <h3>Spending for {month}</h3>
-        <table style={{ tableLayout: 'fixed', width: '100%' }}>
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Merchant</th>
-              <th>Category</th>
-              <th>Method</th>
-              <th style={{ textAlign: 'right' }}>Amount</th>
-              {/* 👇 Give it a label + narrow width so it doesn't collapse */}
-              <th style={{ width: 1, whiteSpace: 'nowrap', textAlign: 'right' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(r => {
-              const merchantName =
-                r.merchant_name ||
-                merchants.find((m: any) => m.id === r.merchant_id)?.name ||
-                '—';
-              const categoryName =
-                cats.find(c => c.id === r.category_id)?.name || '—';
-              return (
-                <tr key={r.id}>
-                  <td>{dayjs(r.date).format('YYYY-MM-DD')}</td>
-                  <td>{merchantName}</td>
-                  <td>{categoryName}</td>
-                  <td>{r.method}</td>
-                  <td style={{ textAlign: 'right' }}>${(r.amount_cents / 100).toFixed(2)}</td>
-                  <td style={{ textAlign: 'right' }}>
-                    <button
-                      className="btn"
-                      title="Delete"
-                      aria-label="Delete transaction"
-                      disabled={pendingDeleteId === r.id}
-                      onClick={async () => {
-                        if (!confirm('Delete this transaction?')) return;
-                        const id = r.id;
-                        setPendingDeleteId(id);
-                        const snapshot = rows;
-                        setRows(prev => prev.filter(x => x.id !== id));
-                        try {
-                          await deleteTransaction(id);
-                        } catch (e) {
-                          setRows(snapshot); // rollback if failed
-                          showError(e);
-                        } finally {
-                          setPendingDeleteId(null);
-                        }
-                      }}
-                      // 👇 ensure it's visibly styled even if your .btn is minimal
-                      style={{
-                        padding: '4px 10px',
-                        border: '1px solid #e2e8f0',
-                        borderRadius: 6,
-                        background: '#fff',
-                        lineHeight: 1.1,
-                        cursor: pendingDeleteId === r.id ? 'not-allowed' : 'pointer'
-                      }}
-                    >
-                      🗑️ <span style={{ fontSize: 12, marginLeft: 4 }}>Delete</span>
-                    </button>
+
+        {/* keeps table inside the card on narrow screens */}
+        <div style={{ width: '100%', overflowX: 'auto' }}>
+          <table style={{ tableLayout: 'fixed', width: '100%', borderCollapse: 'collapse' }}>
+            <colgroup>
+              <col style={{ width: 120 }} />   {/* Date */}
+              <col />                          {/* Merchant (flex) */}
+              <col style={{ width: 200 }} />   {/* Category */}
+              <col style={{ width: 120 }} />   {/* Method */}
+              <col style={{ width: 110 }} />   {/* Amount */}
+              <col style={{ width: 90 }} />    {/* Actions */}
+            </colgroup>
+
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Merchant</th>
+                <th>Category</th>
+                <th>Method</th>
+                <th style={{ textAlign: 'right' }}>Amount</th>
+                <th style={{ textAlign: 'right' }}>Actions</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {rows.map(r => {
+                const merchantName =
+                  r.merchant_name ||
+                  merchants.find((m: any) => m.id === r.merchant_id)?.name ||
+                  '—';
+                const categoryName =
+                  cats.find(c => c.id === r.category_id)?.name || '—';
+
+                return (
+                  <tr key={r.id}>
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {dayjs(r.date).format('YYYY-MM-DD')}
+                    </td>
+
+                    {/* long text → truncate with ellipsis */}
+                    <td style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {merchantName}
+                    </td>
+                    <td style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {categoryName}
+                    </td>
+
+                    <td style={{ whiteSpace: 'nowrap' }}>{r.method}</td>
+
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      ${(r.amount_cents / 100).toFixed(2)}
+                    </td>
+
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <button
+                        className="btn"
+                        title="Delete"
+                        aria-label="Delete transaction"
+                        disabled={pendingDeleteId === r.id}
+                        onClick={async () => {
+                          if (!confirm('Delete this transaction?')) return;
+                          const id = r.id;
+                          setPendingDeleteId(id);
+                          const snapshot = rows;
+                          // optimistic remove
+                          setRows(prev => prev.filter(x => x.id !== id));
+                          try {
+                            await deleteTransaction(id);
+                          } catch (e) {
+                            // rollback on failure
+                            setRows(snapshot);
+                            showError(e);
+                          } finally {
+                            setPendingDeleteId(null);
+                          }
+                        }}
+                        style={{
+                          padding: '4px 10px',
+                          border: '1px solid #e2e8f0',
+                          borderRadius: 6,
+                          background: '#fff',
+                          lineHeight: 1.1,
+                          cursor: pendingDeleteId === r.id ? 'not-allowed' : 'pointer'
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={6} style={{ color: '#58719d' }}>
+                    No spending yet for this month.
                   </td>
                 </tr>
-              );
-            })}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={6} style={{ color: '#58719d' }}>No spending yet for this month.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
+
 
     </>
   );
