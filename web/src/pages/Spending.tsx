@@ -1,7 +1,14 @@
 // src/pages/Spending.tsx
 import { useEffect, useState } from 'react';
 import dayjs from 'dayjs';
-import { getCategories, getMerchants, addTxn, listTxns } from '../api';
+import {
+  getCategories,
+  getMerchants,
+  addTxn,
+  listTxns,
+  deleteTransaction,     // <-- add
+  restoreTransaction     // <-- add
+} from '../api';
 
 type SpendForm = {
   date: string;
@@ -21,6 +28,10 @@ export default function Spending() {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
   const [newMerchant, setNewMerchant] = useState('');
+
+  // for delete/undo UI
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [lastDeleted, setLastDeleted] = useState<any | null>(null);
 
   const [form, setForm] = useState<SpendForm>({
     date: dayjs().format('YYYY-MM-DD'),
@@ -50,17 +61,34 @@ export default function Spending() {
     })();
   }, []);
 
+  async function refreshMonth() {
+    setRows(await listTxns(month));
+  }
+
   useEffect(() => {
     (async () => {
-      setRows(await listTxns(month));
+      await refreshMonth();
     })();
   }, [month]);
 
   const totalSpend = rows.reduce((s, r) => s + r.amount_cents / 100, 0);
+
+  // ✅ Only require date, amount, method
   const valid =
     form.amount > 0 &&
     /^\d{4}-\d{2}-\d{2}$/.test(form.date) &&
-    (!!form.merchantId || form.merchantName.trim().length > 0);
+    ['debit', 'credit', 'cash', 'ach'].includes(form.method);
+
+  // helpful util: strip empty optionals before POST
+  function cleanPayload<T extends Record<string, any>>(obj: T): Record<string, any> {
+    const out: Record<string, any> = { ...obj };
+    if (!out.merchantId) delete out.merchantId;
+    if (!out.merchantName || !String(out.merchantName).trim()) delete out.merchantName;
+    if (!out.categoryId) delete out.categoryId;
+    if (!out.notes || !String(out.notes).trim()) delete out.notes;
+    return out;
+  }
+
 
   return (
     <>
@@ -76,6 +104,27 @@ export default function Spending() {
       </div>
 
       {err && <div className="alert">{err}</div>}
+
+      {/* Undo banner */}
+      {lastDeleted && (
+        <div className="alert" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>Transaction deleted.</span>
+          <button
+            className="btn"
+            onClick={async () => {
+              try {
+                await restoreTransaction(lastDeleted.id);
+                setRows(prev => [lastDeleted, ...prev].sort((a,b) => a.date.localeCompare(b.date)));
+                setLastDeleted(null);
+              } catch (e) {
+                showError(e);
+              }
+            }}
+          >
+            Undo
+          </button>
+        </div>
+      )}
 
       {/* Add Spending */}
       <div className="card" style={{ marginBottom: 16 }}>
@@ -135,8 +184,6 @@ export default function Spending() {
               try {
                 const name = newMerchant.trim();
                 if (!name) return;
-                // Reuse your existing POST /api/merchants via api.ts if you have it exposed;
-                // Otherwise, simple fetch:
                 await fetch('/api/merchants', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -207,13 +254,9 @@ export default function Spending() {
           onClick={async () => {
             try {
               setSaving(true);
-              const payload: any = { ...form };
-              if (!payload.categoryId) delete payload.categoryId;
-              if (!payload.merchantId && !payload.merchantName.trim()) {
-                setErr('Pick a merchant or type one.'); setSaving(false); return;
-              }
+              const payload = cleanPayload({ ...form });
               await addTxn(payload);
-              setRows(await listTxns(month));
+              await refreshMonth();
               setForm({ ...form, amount: 0, merchantName: '', notes: '' });
             } catch (e) {
               showError(e);
@@ -237,32 +280,61 @@ export default function Spending() {
               <th>Category</th>
               <th>Method</th>
               <th style={{ textAlign: 'right' }}>Amount</th>
+              <th /> {/* actions */}
             </tr>
           </thead>
-        <tbody>
-          {rows.map(r => {
-            const merchantName =
-              r.merchant_name ||
-              merchants.find((m: any) => m.id === r.merchant_id)?.name ||
-              '—';
-            const categoryName =
-              cats.find(c => c.id === r.category_id)?.name || '—';
-            return (
-              <tr key={r.id}>
-                <td>{dayjs(r.date).format('YYYY-MM-DD')}</td>
-                <td>{merchantName}</td>
-                <td>{categoryName}</td>
-                <td>{r.method}</td>
-                <td style={{ textAlign: 'right' }}>${(r.amount_cents / 100).toFixed(2)}</td>
+          <tbody>
+            {rows.map(r => {
+              const merchantName =
+                r.merchant_name ||
+                merchants.find((m: any) => m.id === r.merchant_id)?.name ||
+                '—';
+              const categoryName =
+                cats.find(c => c.id === r.category_id)?.name || '—';
+              return (
+                <tr key={r.id}>
+                  <td>{dayjs(r.date).format('YYYY-MM-DD')}</td>
+                  <td>{merchantName}</td>
+                  <td>{categoryName}</td>
+                  <td>{r.method}</td>
+                  <td style={{ textAlign: 'right' }}>${(r.amount_cents / 100).toFixed(2)}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    <button
+                      className="btn"
+                      title="Delete"
+                      aria-label="Delete transaction"
+                      disabled={pendingId === r.id}
+                      onClick={async () => {
+                        if (!confirm('Delete this transaction?')) return;
+                        setPendingId(r.id);
+                        setLastDeleted(r);                        // keep for Undo
+                        setRows(prev => prev.filter(x => x.id !== r.id)); // optimistic
+
+                        try {
+                          await deleteTransaction(r.id);
+                          // keep lastDeleted available for undo
+                        } catch (e) {
+                          // rollback
+                          setRows(prev => [r, ...prev].sort((a,b) => a.date.localeCompare(b.date)));
+                          setLastDeleted(null);
+                          showError(e);
+                        } finally {
+                          setPendingId(null);
+                        }
+                      }}
+                    >
+                      🗑️
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={6} style={{ color: '#58719d' }}>No spending yet for this month.</td>
               </tr>
-            );
-          })}
-          {rows.length === 0 && (
-            <tr>
-              <td colSpan={5} style={{ color: '#58719d' }}>No spending yet for this month.</td>
-            </tr>
-          )}
-        </tbody>
+            )}
+          </tbody>
         </table>
       </div>
     </>
