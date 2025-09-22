@@ -157,67 +157,92 @@ export default function Income() {
       {/* Income list */}
       <div className="card">
         <h3>Income for {month}</h3>
-        <table style={{ tableLayout: 'fixed', width: '100%' }}>
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Source</th>
-              <th>Category</th>
-              <th style={{ textAlign: 'right' }}>Amount</th>
-              <th style={{ width: 1, whiteSpace: 'nowrap', textAlign: 'right' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(r => (
-              <tr key={r.id}>
-                <td>{dayjs(r.date).format('YYYY-MM-DD')}</td>
-                <td>{r.source}</td>
-                <td>{cats.find(c => c.id === r.category_id)?.name || '—'}</td>
-                <td style={{ textAlign: 'right' }}>${(r.amount_cents / 100).toFixed(2)}</td>
-                <td style={{ textAlign: 'right' }}>
-                  <button
-                    className="btn"
-                    title="Delete"
-                    aria-label="Delete income"
-                    disabled={pendingDeleteId === r.id}
-                    onClick={async () => {
-                      if (!confirm('Delete this income item?')) return;
-                      const id = r.id;
-                      setPendingDeleteId(id);
-                      const snapshot = rows;
-                      // optimistic remove
-                      setRows(prev => prev.filter(x => x.id !== id));
-                      try {
-                        await deleteIncome(id);
-                      } catch (e) {
-                        // rollback on failure
-                        setRows(snapshot);
-                        showError(e);
-                      } finally {
-                        setPendingDeleteId(null);
-                      }
-                    }}
-                    style={{
-                      padding: '4px 10px',
-                      border: '1px solid #e2e8f0',
-                      borderRadius: 6,
-                      background: '#fff',
-                      lineHeight: 1.1,
-                      cursor: pendingDeleteId === r.id ? 'not-allowed' : 'pointer'
-                    }}
-                  >Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
+
+        {/* 👇 keeps the table inside the card on small screens */}
+        <div style={{ width: '100%', overflowX: 'auto' }}>
+          <table style={{ tableLayout: 'fixed', width: '100%', borderCollapse: 'collapse' }}>
+            {/* 👇 optional: set predictable column widths */}
+            <colgroup>
+              <col style={{ width: 120 }} />                 {/* Date */}
+              <col />                                        {/* Source (flex) */}
+              <col style={{ width: 200 }} />                 {/* Category */}
+              <col style={{ width: 120 }} />                 {/* Amount */}
+              <col style={{ width: 90 }} />                  {/* Actions */}
+            </colgroup>
+
+            <thead>
               <tr>
-                <td colSpan={5} style={{ color: '#58719d' }}>No income yet for this month.</td>
+                <th>Date</th>
+                <th>Source</th>
+                <th>Category</th>
+                <th style={{ textAlign: 'right' }}>Amount</th>
+                <th style={{ textAlign: 'right' }}>Actions</th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.id}>
+                  <td style={{ whiteSpace: 'nowrap' }}>{dayjs(r.date).format('YYYY-MM-DD')}</td>
+
+                  {/* 👇 truncate long text with ellipsis */}
+                  <td style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {r.source}
+                  </td>
+                  <td style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {cats.find(c => c.id === r.category_id)?.name || '—'}
+                  </td>
+
+                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    ${(r.amount_cents / 100).toFixed(2)}
+                  </td>
+
+                  <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    <button
+                      className="btn"
+                      title="Delete"
+                      aria-label="Delete income"
+                      disabled={pendingDeleteId === r.id}
+                      onClick={async () => {
+                        if (!confirm('Delete this income item?')) return;
+                        const id = r.id;
+                        setPendingDeleteId(id);
+                        const snapshot = rows;
+                        setRows(prev => prev.filter(x => x.id !== id));
+                        try {
+                          await deleteIncome(id);
+                        } catch (e) {
+                          setRows(snapshot);
+                          showError(e);
+                        } finally {
+                          setPendingDeleteId(null);
+                        }
+                      }}
+                      style={{
+                        padding: '4px 10px',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: 6,
+                        background: '#fff',
+                        lineHeight: 1.1,
+                        cursor: pendingDeleteId === r.id ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+
+              {rows.length === 0 && (
+                <tr>
+                  <td colSpan={5} style={{ color: '#58719d' }}>No income yet for this month.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
+
     </>
   );
 }
