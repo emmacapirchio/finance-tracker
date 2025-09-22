@@ -1,7 +1,7 @@
 // src/pages/Income.tsx
 import { useEffect, useState } from 'react';
 import dayjs from 'dayjs';
-import { getCategories, addIncome, listIncome } from '../api';
+import { getCategories, addIncome, listIncome, deleteIncome } from '../api';
 
 type IncomeForm = {
   date: string;
@@ -17,6 +17,9 @@ export default function Income() {
   const [rows, setRows] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
+
+  // delete state
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const [form, setForm] = useState<IncomeForm>({
     date: dayjs().format('YYYY-MM-DD'),
@@ -50,7 +53,10 @@ export default function Income() {
   }, [month]);
 
   const totalIncome = rows.reduce((s, r) => s + r.amount_cents / 100, 0);
-  const valid = form.amount > 0 && /^\d{4}-\d{2}-\d{2}$/.test(form.date) && form.source.trim();
+  const valid =
+    form.amount > 0 &&
+    /^\d{4}-\d{2}-\d{2}$/.test(form.date) &&
+    Boolean(form.source.trim());
 
   return (
     <>
@@ -151,13 +157,14 @@ export default function Income() {
       {/* Income list */}
       <div className="card">
         <h3>Income for {month}</h3>
-        <table>
+        <table style={{ tableLayout: 'fixed', width: '100%' }}>
           <thead>
             <tr>
               <th>Date</th>
               <th>Source</th>
               <th>Category</th>
               <th style={{ textAlign: 'right' }}>Amount</th>
+              <th style={{ width: 1, whiteSpace: 'nowrap', textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -167,11 +174,46 @@ export default function Income() {
                 <td>{r.source}</td>
                 <td>{cats.find(c => c.id === r.category_id)?.name || '—'}</td>
                 <td style={{ textAlign: 'right' }}>${(r.amount_cents / 100).toFixed(2)}</td>
+                <td style={{ textAlign: 'right' }}>
+                  <button
+                    className="btn"
+                    title="Delete"
+                    aria-label="Delete income"
+                    disabled={pendingDeleteId === r.id}
+                    onClick={async () => {
+                      if (!confirm('Delete this income item?')) return;
+                      const id = r.id;
+                      setPendingDeleteId(id);
+                      const snapshot = rows;
+                      // optimistic remove
+                      setRows(prev => prev.filter(x => x.id !== id));
+                      try {
+                        await deleteIncome(id);
+                      } catch (e) {
+                        // rollback on failure
+                        setRows(snapshot);
+                        showError(e);
+                      } finally {
+                        setPendingDeleteId(null);
+                      }
+                    }}
+                    style={{
+                      padding: '4px 10px',
+                      border: '1px solid #e2e8f0',
+                      borderRadius: 6,
+                      background: '#fff',
+                      lineHeight: 1.1,
+                      cursor: pendingDeleteId === r.id ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    🗑️ <span style={{ fontSize: 12, marginLeft: 4 }}>Delete</span>
+                  </button>
+                </td>
               </tr>
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={4} style={{ color: '#58719d' }}>No income yet for this month.</td>
+                <td colSpan={5} style={{ color: '#58719d' }}>No income yet for this month.</td>
               </tr>
             )}
           </tbody>
