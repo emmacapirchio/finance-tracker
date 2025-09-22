@@ -260,19 +260,19 @@ export async function updateAssumptions(payload: {
   return (await api.put('/settings/assumptions', payload)).data;
 }
 
-// --- Soft delete + restore ---
-export async function deleteTransaction(id: string) {
-  await api.delete(`/transactions/${id}`);
-}
+// // --- Soft delete + restore ---
+// export async function deleteTransaction(id: string) {
+//   await api.delete(`/transactions/${id}`);
+// }
 
-export async function restoreTransaction(id: string) {
-  await api.post(`/transactions/${id}/restore`, {});
-}
+// export async function restoreTransaction(id: string) {
+//   await api.post(`/transactions/${id}/restore`, {});
+// }
 
-export async function deleteIncome(id: string) {
-  await api.delete(`/income/${id}`);
-}
+// export async function deleteIncome(id: string) {
+//   await api.delete(`/income/${id}`);
+// }
 
-export async function restoreIncome(id: string) {
-  await api.post(`/income/${id}/restore`, {});
-}
+// export async function restoreIncome(id: string) {
+//   await api.post(`/income/${id}/restore`, {});
+// }
