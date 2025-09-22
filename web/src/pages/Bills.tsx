@@ -1,7 +1,6 @@
 // src/pages/Bills.tsx
 import { useEffect, useState } from 'react';
-
-/* ---------- Types ---------- */
+import { listBills, createBill, deleteBill } from '../api';
 
 type Cadence = 'monthly' | 'annual' | 'weekly' | 'biweekly' | 'quarterly' | 'once';
 type Method  = 'debit' | 'credit' | 'cash' | 'ach';
@@ -9,12 +8,12 @@ type BillType = 'bill' | 'subscription';
 
 type BillPost = {
   name: string;
-  amount: number;                 // dollars in UI
+  amount: number;
   cadence: Cadence;
   type: BillType;
   due_day?: number | null;
-  start_date?: string | null;     // YYYY-MM-DD or null
-  end_date?: string | null;       // YYYY-MM-DD or null
+  start_date?: string | null;
+  end_date?: string | null;
   method?: Method | null;
   notes?: string | null;
 };
@@ -27,13 +26,11 @@ type BillRow = {
   cadence: Cadence;
   type: BillType;
   due_day: number | null;
-  start_date: string | null;      // may be ISO from API; we only display name/amount here
+  start_date: string | null;
   end_date: string | null;
   payment_method: Method | null;
   notes: string | null;
 };
-
-/* ---------- Component ---------- */
 
 export default function Bills() {
   const [rows, setRows] = useState<BillRow[]>([]);
@@ -56,10 +53,7 @@ export default function Bills() {
     setLoading(true);
     setErr(null);
     try {
-      // No userId: server reads the user from the cookie
-      const r = await fetch('/api/bills?type=all', { credentials: 'include' });
-      if (!r.ok) throw new Error(`Load failed: ${r.status}`);
-      const data: BillRow[] = await r.json();
+      const data: BillRow[] = await listBills('all'); // server infers user from cookie
       setRows(data);
     } catch (e: any) {
       setErr(e?.message ?? 'Failed to load bills');
@@ -68,40 +62,35 @@ export default function Bills() {
     }
   }
 
-
   useEffect(() => { load(); }, []);
 
   function sanitizeForPost(b: BillPost) {
-    // normalize strings
     const name = (b.name ?? '').trim();
     const notes = (b.notes ?? '').trim();
-    // clamp/round money to 2 decimals
     const amount = Number.isFinite(b.amount) ? Math.max(0, Math.round(b.amount * 100) / 100) : 0;
     const amount_cents = Math.round(amount * 100);
-    // convert empty → null
-    const due_day = b.due_day === undefined || b.due_day === null || b.due_day === 0 ? null : b.due_day;
-    const start_date = b.start_date && b.start_date.trim() !== '' ? b.start_date : null;
-    const end_date   = b.end_date   && b.end_date.trim()   !== '' ? b.end_date   : null;
-    const method     = b.method ?? null;
+    const due_day = b.due_day == null || b.due_day === 0 ? null : b.due_day;
+    const start_date = b.start_date && b.start_date.trim() ? b.start_date : null;
+    const end_date   = b.end_date   && b.end_date.trim()   ? b.end_date   : null;
 
-    return { name, amount_cents, cadence: b.cadence, type: b.type, due_day, start_date, end_date, payment_method: b.method ?? null, notes: notes || null };
+    return {
+      name,
+      amount_cents,
+      cadence: b.cadence,
+      type: b.type,
+      due_day,
+      start_date,
+      end_date,
+      payment_method: b.method ?? null,
+      notes: notes || null,
+    };
   }
 
   async function addBill() {
     setErr(null);
     const payload = sanitizeForPost(bill);
     try {
-      const r = await fetch('/api/bills', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(payload),
-      });
-      if (!r.ok) {
-        const msg = await r.text();
-        throw new Error(msg || `Add failed: ${r.status}`);
-      }
-      // reset a few fields, keep cadence/method for convenience
+      await createBill(payload);
       setBill(b => ({ ...b, name: '', amount: 0, due_day: undefined, notes: '' }));
       await load();
     } catch (e: any) {
@@ -111,15 +100,10 @@ export default function Bills() {
 
   async function remove(id: string) {
     setErr(null);
-    // optimistic UI (optional)
     const prev = rows;
-    setRows(rs => rs.filter(r => r.id !== id));
+    setRows(rs => rs.filter(r => r.id !== id)); // optimistic
     try {
-      const r = await fetch(`/api/bills/${id}`, {
-        method: 'DELETE',
-        credentials: 'include',
-      });
-      if (!r.ok) throw new Error(`Delete failed: ${r.status}`);
+      await deleteBill(id);
     } catch (e: any) {
       setErr(e?.message ?? 'Failed to delete bill');
       setRows(prev); // rollback
@@ -135,11 +119,7 @@ export default function Bills() {
 
         <div className="row">
           <label>Name</label>
-          <input
-            className="input"
-            value={bill.name}
-            onChange={e => setBill({ ...bill, name: e.target.value })}
-          />
+          <input className="input" value={bill.name} onChange={e => setBill({ ...bill, name: e.target.value })} />
         </div>
 
         <div className="row">
@@ -171,17 +151,16 @@ export default function Bills() {
         </div>
 
         <div className="row">
-            <label>Type</label>
-            <select
-                className="select"
-                value={bill.type}
-                onChange={e => setBill({ ...bill, type: e.target.value as 'bill' | 'subscription' })}
-            >
-                <option value="bill">bill</option>
-                <option value="subscription">subscription</option>
-            </select>
+          <label>Type</label>
+          <select
+            className="select"
+            value={bill.type}
+            onChange={e => setBill({ ...bill, type: e.target.value as 'bill' | 'subscription' })}
+          >
+            <option value="bill">bill</option>
+            <option value="subscription">subscription</option>
+          </select>
         </div>
-
 
         <div className="row">
           <label>Due day (1–31, optional)</label>
@@ -191,16 +170,10 @@ export default function Bills() {
             min={1}
             max={31}
             value={bill.due_day ?? ''}
-            onChange={e =>
-              setBill({
-                ...bill,
-                due_day: e.target.value ? Number(e.target.value) : undefined,
-              })
-            }
+            onChange={e => setBill({ ...bill, due_day: e.target.value ? Number(e.target.value) : undefined })}
           />
         </div>
 
-        {/* Optional: method + dates */}
         <div className="row">
           <label>Method</label>
           <select
@@ -218,31 +191,17 @@ export default function Bills() {
 
         <div className="row">
           <label>Start date (YYYY-MM-DD)</label>
-          <input
-            className="input"
-            type="date"
-            value={bill.start_date ?? ''}
-            onChange={e => setBill({ ...bill, start_date: e.target.value || null })}
-          />
+          <input className="input" type="date" value={bill.start_date ?? ''} onChange={e => setBill({ ...bill, start_date: e.target.value || null })} />
         </div>
 
         <div className="row">
           <label>End date (YYYY-MM-DD)</label>
-          <input
-            className="input"
-            type="date"
-            value={bill.end_date ?? ''}
-            onChange={e => setBill({ ...bill, end_date: e.target.value || null })}
-          />
+          <input className="input" type="date" value={bill.end_date ?? ''} onChange={e => setBill({ ...bill, end_date: e.target.value || null })} />
         </div>
 
         <div className="row">
           <label>Notes</label>
-          <input
-            className="input"
-            value={bill.notes ?? ''}
-            onChange={e => setBill({ ...bill, notes: e.target.value })}
-          />
+          <input className="input" value={bill.notes ?? ''} onChange={e => setBill({ ...bill, notes: e.target.value })} />
         </div>
 
         <button className="btn btn-primary" onClick={addBill} disabled={loading}>
