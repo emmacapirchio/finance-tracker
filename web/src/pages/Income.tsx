@@ -205,8 +205,7 @@ export default function Income() {
                       lineHeight: 1.1,
                       cursor: pendingDeleteId === r.id ? 'not-allowed' : 'pointer'
                     }}
-                  >
-                    Delete <span style={{ fontSize: 12, marginLeft: 4 }}>Delete</span>
+                  >Delete
                   </button>
                 </td>
               </tr>
