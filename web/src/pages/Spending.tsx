@@ -1,7 +1,7 @@
 // src/pages/Spending.tsx
 import { useEffect, useState } from 'react';
 import dayjs from 'dayjs';
-import { getCategories, getMerchants, addTxn, listTxns } from '../api';
+import { getCategories, getMerchants, addTxn, listTxns, deleteTransaction } from '../api'; // ⬅️ import delete
 
 type SpendForm = {
   date: string;
@@ -21,6 +21,9 @@ export default function Spending() {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
   const [newMerchant, setNewMerchant] = useState('');
+
+  // delete state
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
 
   const [form, setForm] = useState<SpendForm>({
     date: dayjs().format('YYYY-MM-DD'),
@@ -135,8 +138,6 @@ export default function Spending() {
               try {
                 const name = newMerchant.trim();
                 if (!name) return;
-                // Reuse your existing POST /api/merchants via api.ts if you have it exposed;
-                // Otherwise, simple fetch:
                 await fetch('/api/merchants', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -237,32 +238,60 @@ export default function Spending() {
               <th>Category</th>
               <th>Method</th>
               <th style={{ textAlign: 'right' }}>Amount</th>
+              <th /> {/* actions */}
             </tr>
           </thead>
-        <tbody>
-          {rows.map(r => {
-            const merchantName =
-              r.merchant_name ||
-              merchants.find((m: any) => m.id === r.merchant_id)?.name ||
-              '—';
-            const categoryName =
-              cats.find(c => c.id === r.category_id)?.name || '—';
-            return (
-              <tr key={r.id}>
-                <td>{dayjs(r.date).format('YYYY-MM-DD')}</td>
-                <td>{merchantName}</td>
-                <td>{categoryName}</td>
-                <td>{r.method}</td>
-                <td style={{ textAlign: 'right' }}>${(r.amount_cents / 100).toFixed(2)}</td>
+          <tbody>
+            {rows.map(r => {
+              const merchantName =
+                r.merchant_name ||
+                merchants.find((m: any) => m.id === r.merchant_id)?.name ||
+                '—';
+              const categoryName =
+                cats.find(c => c.id === r.category_id)?.name || '—';
+              return (
+                <tr key={r.id}>
+                  <td>{dayjs(r.date).format('YYYY-MM-DD')}</td>
+                  <td>{merchantName}</td>
+                  <td>{categoryName}</td>
+                  <td>{r.method}</td>
+                  <td style={{ textAlign: 'right' }}>${(r.amount_cents / 100).toFixed(2)}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    <button
+                      className="btn"
+                      title="Delete"
+                      aria-label="Delete transaction"
+                      disabled={pendingDeleteId === r.id}
+                      onClick={async () => {
+                        if (!confirm('Delete this transaction?')) return;
+                        const id = r.id;
+                        setPendingDeleteId(id);
+                        // optimistic remove
+                        setRows(prev => prev.filter(x => x.id !== id));
+                        try {
+                          await deleteTransaction(id);
+                          // success, nothing else to do
+                        } catch (e) {
+                          // rollback if failed
+                          setRows(prev => [r, ...prev].sort((a,b) => a.date.localeCompare(b.date)));
+                          showError(e);
+                        } finally {
+                          setPendingDeleteId(null);
+                        }
+                      }}
+                    >
+                      🗑️
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+            {rows.length === 0 && (
+              <tr>
+                <td colSpan={6} style={{ color: '#58719d' }}>No spending yet for this month.</td>
               </tr>
-            );
-          })}
-          {rows.length === 0 && (
-            <tr>
-              <td colSpan={5} style={{ color: '#58719d' }}>No spending yet for this month.</td>
-            </tr>
-          )}
-        </tbody>
+            )}
+          </tbody>
         </table>
       </div>
     </>
