@@ -230,7 +230,7 @@ export default function Spending() {
       {/* Spending list */}
       <div className="card">
         <h3>Spending for {month}</h3>
-        <table>
+        <table style={{ tableLayout: 'fixed', width: '100%' }}>
           <thead>
             <tr>
               <th>Date</th>
@@ -238,7 +238,8 @@ export default function Spending() {
               <th>Category</th>
               <th>Method</th>
               <th style={{ textAlign: 'right' }}>Amount</th>
-              <th /> {/* actions */}
+              {/* 👇 Give it a label + narrow width so it doesn't collapse */}
+              <th style={{ width: 1, whiteSpace: 'nowrap', textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -266,21 +267,28 @@ export default function Spending() {
                         if (!confirm('Delete this transaction?')) return;
                         const id = r.id;
                         setPendingDeleteId(id);
-                        // optimistic remove
+                        const snapshot = rows;
                         setRows(prev => prev.filter(x => x.id !== id));
                         try {
                           await deleteTransaction(id);
-                          // success, nothing else to do
                         } catch (e) {
-                          // rollback if failed
-                          setRows(prev => [r, ...prev].sort((a,b) => a.date.localeCompare(b.date)));
+                          setRows(snapshot); // rollback if failed
                           showError(e);
                         } finally {
                           setPendingDeleteId(null);
                         }
                       }}
+                      // 👇 ensure it's visibly styled even if your .btn is minimal
+                      style={{
+                        padding: '4px 10px',
+                        border: '1px solid #e2e8f0',
+                        borderRadius: 6,
+                        background: '#fff',
+                        lineHeight: 1.1,
+                        cursor: pendingDeleteId === r.id ? 'not-allowed' : 'pointer'
+                      }}
                     >
-                      🗑️
+                      🗑️ <span style={{ fontSize: 12, marginLeft: 4 }}>Delete</span>
                     </button>
                   </td>
                 </tr>
@@ -294,6 +302,7 @@ export default function Spending() {
           </tbody>
         </table>
       </div>
+
     </>
   );
 }
