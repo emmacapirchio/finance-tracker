@@ -137,6 +137,24 @@ export const api = axios.create({
   withCredentials: true, // send/receive HTTP-only fin_auth cookie
 });
 
+api.interceptors.response.use(
+  r => r,
+  err => {
+    if (err.response) {
+      const { status, data, headers } = err.response;
+      console.error(
+        'API error:',
+        status,
+        headers['content-type'],
+        typeof data === 'object' ? JSON.stringify(data, null, 2) : data
+      );
+    } else {
+      console.error('Network/other error:', err.message);
+    }
+    return Promise.reject(err);
+  }
+);
+
 // Make API errors readable across the app
 api.interceptors.response.use(
   (r) => r,
