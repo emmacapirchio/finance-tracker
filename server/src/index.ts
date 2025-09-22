@@ -2,6 +2,19 @@
 import * as dotenv from 'dotenv';
 dotenv.config();
 
+try {
+  const u = new URL(process.env.DATABASE_URL || '');
+  console.log('[DB]', {
+    host: u.hostname,
+    port: u.port,
+    pgbouncer: u.searchParams.get('pgbouncer'),
+    connection_limit: u.searchParams.get('connection_limit')
+  });
+} catch (e) {
+  console.log('[DB] could not parse DATABASE_URL');
+}
+
+
 import { z } from 'zod';
 import express from 'express';
 import cors from 'cors';
