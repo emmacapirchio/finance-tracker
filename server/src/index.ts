@@ -264,6 +264,16 @@ app.get('/api/income', requireAuth, async (req: any, res) => {
   }
 });
 
+// HARD DELETE income row
+app.delete('/api/income/:id', requireAuth, async (req: any, res) => {
+  const del = await prisma.income.deleteMany({
+    where: { id: String(req.params.id), user_id: req.userId },
+  });
+  if (del.count === 0) return res.status(404).json({ error: 'Not found' });
+  res.status(204).end();
+});
+
+
 /* =========================
    Transactions (spending)
    ========================= */
@@ -302,6 +312,16 @@ app.get('/api/transactions', requireAuth, async (req: any, res) => {
     res.status(status).json({ error: e?.message || 'Failed to fetch transactions' });
   }
 });
+
+// HARD DELETE transaction row
+app.delete('/api/transactions/:id', requireAuth, async (req: any, res) => {
+  const del = await prisma.transactions.deleteMany({
+    where: { id: String(req.params.id), user_id: req.userId },
+  });
+  if (del.count === 0) return res.status(404).json({ error: 'Not found' });
+  res.status(204).end();
+});
+
 
 /* =========================
    Monthly overview (DB view)
