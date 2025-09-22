@@ -12,21 +12,24 @@ const moneyAmount = z
   .coerce.number()
   .finite()
   .nonnegative()
-  .refine(v => Math.round(v * 100) === v * 100, 'Max 2 decimal places');
+  .refine(
+    v => Number.isInteger(Math.round((v + Number.EPSILON) * 100)),
+    'Max 2 decimal places'
+  );
 
-// Handle optional/nullable UUID coming from forms that send "" for empty
+// Handle optional/nullable UUID coming from forms that may send "" or null
 const uuidOrNull = z
-  .union([z.string().uuid(), z.literal('')])
+  .union([z.string().uuid(), z.literal(''), z.null()])
   .optional()
-  .transform(v => (v === '' || v === undefined ? null : v));
+  .transform(v => (v === '' || v == null ? null : v));
 
-// Optional text: trim; convert "" to undefined; cap length to keep DB happy
+// Optional text: trim; convert ""/null to undefined; cap length to keep DB happy
 const optionalText = z
   .string()
   .trim()
   .max(1000, 'Too long')
   .optional()
-  .transform(v => (v === '' ? undefined : v));
+  .transform(v => (v == null || v === '' ? undefined : v));
 
 /* -----------------------------
    Schemas
@@ -46,7 +49,7 @@ export const txnSchema = z.object({
   merchantId: uuidOrNull,          // -> string | null
   merchantName: optionalText,      // -> string | undefined
   categoryId: uuidOrNull,          // -> string | null
-  method: z.enum(['credit', 'debit', 'cash', 'ach']),
+  method: z.enum(['credit', 'debit', 'cash', 'ach']), // expand if UI uses 'card'
   notes: optionalText,
 });
 
