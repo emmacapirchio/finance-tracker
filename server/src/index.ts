@@ -251,7 +251,11 @@ app.put('/api/settings/assumptions', requireAuth, async (req: any, res) => {
 /* Health                                                             */
 /* ------------------------------------------------------------------ */
 
-app.get('/api/health', (_req, res) => res.json({ ok: true }));
+// app.get('/api/health', (_req, res) => res.json({ ok: true }));
+app.get('/api/health', (_req, res) =>
+  res.json({ ok: true, build: 'summary-with-bills+debug' })
+);
+
 
 /* ------------------------------------------------------------------ */
 /* Categories & Merchants                                             */
@@ -460,7 +464,7 @@ app.get('/api/forecast', requireAuth, async (req: any, res) => {
           key, isPastMonth, inc, actualSpend, plannedBills, chosenSpend: spend, net
         });
       }
-      
+
       cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth()+1, 1));
     }
 
