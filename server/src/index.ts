@@ -568,32 +568,34 @@ app.get('/api/summary', requireAuth, async (req: any, res) => {
   try {
     const debug = String(req.query.debug || '') === '1';
     const month = String(req.query.month || '');
-    const { start, end } = monthRange(month); // start = 1st of month (UTC), end = 1st of next month
+    const { start, end } = monthRange(month); // end = first of next month
 
-    // Only build the plan for THIS month to avoid off-by-one confusion
-    const [incAgg, spendAgg, billsPlanMap] = await Promise.all([
+    // Build an explicit end-of-month timestamp for the bills helper (inclusive)
+    const endOfMonth = new Date(
+      Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0, 23, 59, 59)
+    );
+
+    // Core aggregates (actuals)
+    const [incAgg, spendAgg] = await Promise.all([
       prisma.income.aggregate({
         _sum: { amount_cents: true },
-        where: { user_id: req.userId, date: { gte: start, lt: end } }
+        where: { user_id: req.userId, date: { gte: start, lt: end } },
       }),
       prisma.transactions.aggregate({
         _sum: { amount_cents: true },
-        where: { user_id: req.userId, date: { gte: start, lt: end } }
+        where: { user_id: req.userId, date: { gte: start, lt: end } },
       }),
-      // Compute planned bills just for this month window
-      buildBillsPlanByMonth(
-        req.userId,
-        start,
-        new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0, 23, 59, 59))
-      )
     ]);
+
+    // Planned bills for this month
+    const billsPlanByMonth = await buildBillsPlanByMonth(req.userId, start, endOfMonth);
 
     const incomeCents       = Number(incAgg._sum.amount_cents ?? 0);
     const actualSpendCents  = Number(spendAgg._sum.amount_cents ?? 0);
     const key               = `${start.getUTCFullYear()}-${String(start.getUTCMonth()+1).padStart(2,'0')}`;
-    const plannedBillsCents = billsPlanMap.get(key) ?? 0;
+    const plannedBillsCents = billsPlanByMonth.get(key) ?? 0;
 
-    // Past months: show actuals; current/future: ensure planned bills at minimum
+    // Past months use actuals; current/future use max(actual, planned)
     const now = new Date();
     const isPastMonth =
       start.getUTCFullYear() <  now.getUTCFullYear() ||
@@ -612,10 +614,41 @@ app.get('/api/summary', requireAuth, async (req: any, res) => {
     };
 
     if (debug) {
+      // Extra introspection to figure out why planned bills == 0
+      const billsForUser = await prisma.bills.findMany({
+        where: { user_id: req.userId },
+        orderBy: { name: 'asc' },
+        select: {
+          id: true,
+          name: true,
+          cadence: true,
+          amount_cents: true,
+          start_date: true,
+          end_date: true,
+          type: true,
+        },
+      });
+
       payload._debug = {
+        window: {
+          startUTC: start.toISOString(),
+          endExclusiveUTC: end.toISOString(),
+          endOfMonthInclusiveUTC: endOfMonth.toISOString(),
+        },
         actualSpendCents,
         plannedBillsCents,
         picked: isPastMonth ? 'actual' : 'max(actual, planned)',
+        billsCount: billsForUser.length,
+        // First few bills so we can eyeball the dates/cadence
+        billsSample: billsForUser.slice(0, 5).map(b => ({
+          id: b.id, name: b.name, cadence: b.cadence, type: b.type,
+          amount_cents: b.amount_cents,
+          start_date: b.start_date ? b.start_date.toISOString().slice(0,10) : null,
+          end_date:   b.end_date   ? b.end_date.toISOString().slice(0,10)   : null,
+        })),
+        // What keys exist in the plan map?
+        planKeys: Array.from(billsPlanByMonth.keys()).slice(0, 24),
+        planThisKey: { key, cents: plannedBillsCents },
       };
     }
 
@@ -625,6 +658,7 @@ app.get('/api/summary', requireAuth, async (req: any, res) => {
     res.status(status).json({ error: e?.message || 'Failed to load summary' });
   }
 });
+
 
 
 const port = Number(process.env.PORT || 4000);
