@@ -14,13 +14,12 @@ try {
   console.log('[DB] could not parse DATABASE_URL');
 }
 
-
 import { z } from 'zod';
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
-import { withRequestId, log } from './middleware/logger';  // ✅ add this
-import { errorHandler } from './middleware/errors';        // ✅ add this later
+import { withRequestId, log } from './middleware/logger';
+import { errorHandler } from './middleware/errors';
 import forecastRoutes from './routes/forecast';
 import bcrypt from 'bcryptjs';
 import { prisma } from './prisma';
@@ -38,13 +37,21 @@ const app = express();
 app.use(withRequestId);
 app.use(cors({
   origin: process.env.WEB_ORIGIN || 'http://localhost:5173',
-  credentials: true, // allow cookies
+  credentials: true,
 }));
 app.use(express.json());
 app.use(cookieParser());
 
-// --- helper: month range from "YYYY-MM" ---
-// --- helper: strict month range from "YYYY-MM" ---
+/* ------------------------------------------------------------------ */
+/* Helpers                                                            */
+/* ------------------------------------------------------------------ */
+
+// month key
+function monthKeyUTC(d: Date) {
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}`;
+}
+
+// strict month range from "YYYY-MM"
 function monthRange(yyyyMm: string) {
   if (!/^\d{4}-\d{2}$/.test(yyyyMm)) {
     throw Object.assign(new Error('Invalid month. Use YYYY-MM.'), { status: 400 });
@@ -58,43 +65,89 @@ function monthRange(yyyyMm: string) {
   return { start, end };
 }
 
+// build "planned bills" per month without writing rows
+async function buildBillsPlanByMonth(userId: string, first: Date, end: Date) {
+  const bills = await prisma.bills.findMany({
+    where: {
+      user_id: userId,
+      OR: [{ start_date: null }, { start_date: { lte: end } }],
+      AND: [{ end_date: null }, { end_date: { gte: first } }],
+    },
+  });
 
-// add near other validators
+  const plan = new Map<string, number>();
+  const factor: Record<string, number> = {
+    weekly:    52 / 12,
+    biweekly:  26 / 12,
+    monthly:    1,
+    quarterly:  1 / 3,
+    annual:     1 / 12,
+    once:       0, // special-case below
+  };
+
+  let cursor = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), 1));
+  while (cursor <= end) {
+    const key = monthKeyUTC(cursor);
+    let cents = 0;
+
+    for (const b of bills) {
+      const startOk = !b.start_date || b.start_date <= new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth()+1, 0, 23, 59, 59));
+      const endOk   = !b.end_date   || b.end_date   >= new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), 1));
+      if (!startOk || !endOk) continue;
+
+      const amt = Number(b.amount_cents) || 0;
+      switch (b.cadence) {
+        case 'weekly':
+        case 'biweekly':
+        case 'monthly':
+        case 'quarterly':
+        case 'annual':
+          cents += Math.round(amt * factor[b.cadence]);
+          break;
+        case 'once':
+          if (b.start_date &&
+              b.start_date.getUTCFullYear() === cursor.getUTCFullYear() &&
+              b.start_date.getUTCMonth()    === cursor.getUTCMonth()) {
+            cents += amt;
+          }
+          break;
+        default:
+          cents += amt; // fallback to monthly
+      }
+    }
+
+    plan.set(key, cents);
+    cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth()+1, 1));
+  }
+
+  return plan;
+}
+
+// validator for bills creation
 const billCreateSchema = z.object({
   name: z.string().min(1),
-
-  // Accept either amount_cents (preferred) or amount (dollars)
   amount_cents: z.number().int().nonnegative().optional(),
   amount: z.number().nonnegative().optional(),
-
   cadence: z.enum(['weekly','biweekly','monthly','quarterly','annual','once']),
   type: z.enum(['bill','subscription']).default('bill'),
-
   due_day: z.number().int().min(1).max(31).optional().nullable(),
-
-  // Be flexible: accept YYYY-MM-DD or full ISO; allow undefined/null
   start_date: z.coerce.date().optional().nullable(),
   end_date: z.coerce.date().optional().nullable(),
-
   payment_method: z.enum(['credit','debit','cash','ach']).optional().nullable(),
   notes: z.string().max(10_000).optional().nullable(),
 })
-  // require at least one of amount_cents or amount
-  .refine(d => d.amount_cents !== undefined || d.amount !== undefined, {
-    message: 'Provide amount_cents or amount',
-    path: ['amount'],
-  })
-  // normalize to amount_cents for the DB
-  .transform(d => ({
-    ...d,
-    amount_cents:
-      d.amount_cents ?? Math.round((d.amount ?? 0) * 100),
-  }));
+.refine(d => d.amount_cents !== undefined || d.amount !== undefined, {
+  message: 'Provide amount_cents or amount',
+  path: ['amount'],
+})
+.transform(d => ({
+  ...d,
+  amount_cents: d.amount_cents ?? Math.round((d.amount ?? 0) * 100),
+}));
 
-
-/* =========================
-   Auth routes
-   ========================= */
+/* ------------------------------------------------------------------ */
+/* Auth                                                               */
+/* ------------------------------------------------------------------ */
 
 app.post('/api/register', async (req, res) => {
   const { email, password } = req.body || {};
@@ -142,12 +195,10 @@ app.get('/api/me', requireAuth, async (req: any, res) => {
   res.json({ id: u.id, email: u.email, username: u.username });
 });
 
+/* ------------------------------------------------------------------ */
+/* Settings                                                           */
+/* ------------------------------------------------------------------ */
 
-/* =========================
-   Settings
-   ========================= */
-
-// Change password (allows blank current if user has no password yet)
 app.post('/api/settings/password', requireAuth, async (req: any, res) => {
   const parsed = changePasswordSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
@@ -165,13 +216,11 @@ app.post('/api/settings/password', requireAuth, async (req: any, res) => {
   res.json({ ok: true });
 });
 
-// Read assumptions (current savings, etc.)
 app.get('/api/settings/assumptions', requireAuth, async (req: any, res) => {
   const a = await prisma.assumptions.findUnique({ where: { user_id: req.userId } });
   res.json(a || null);
 });
 
-// Upsert assumptions
 app.put('/api/settings/assumptions', requireAuth, async (req: any, res) => {
   const parsed = assumptionsSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
@@ -198,15 +247,15 @@ app.put('/api/settings/assumptions', requireAuth, async (req: any, res) => {
   res.json(row);
 });
 
-/* =========================
-   Health
-   ========================= */
+/* ------------------------------------------------------------------ */
+/* Health                                                             */
+/* ------------------------------------------------------------------ */
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
-/* =========================
-   Categories & merchants
-   ========================= */
+/* ------------------------------------------------------------------ */
+/* Categories & Merchants                                             */
+/* ------------------------------------------------------------------ */
 
 app.get('/api/categories', requireAuth, async (_req, res) => {
   const cats = await prisma.categories.findMany({ orderBy: { name: 'asc' } });
@@ -227,9 +276,9 @@ app.post('/api/merchants', requireAuth, async (req, res) => {
   res.json(m);
 });
 
-/* =========================
-   Income
-   ========================= */
+/* ------------------------------------------------------------------ */
+/* Income                                                             */
+/* ------------------------------------------------------------------ */
 
 app.post('/api/income', requireAuth, async (req: any, res) => {
   const parsed = incomeSchema.safeParse(req.body);
@@ -273,10 +322,9 @@ app.delete('/api/income/:id', requireAuth, async (req: any, res) => {
   res.status(204).end();
 });
 
-
-/* =========================
-   Transactions (spending)
-   ========================= */
+/* ------------------------------------------------------------------ */
+/* Transactions (spending)                                            */
+/* ------------------------------------------------------------------ */
 
 app.post('/api/transactions', requireAuth, async (req: any, res) => {
   const parsed = txnSchema.safeParse(req.body);
@@ -291,7 +339,7 @@ app.post('/api/transactions', requireAuth, async (req: any, res) => {
       merchant_id: parsed.data.merchantId || null,
       merchant_name: parsed.data.merchantName || null,
       category_id: parsed.data.categoryId || null,
-      method: parsed.data.method, // 'credit' | 'debit' | 'cash' | 'ach'
+      method: parsed.data.method,
       notes: parsed.data.notes || null
     }
   });
@@ -322,10 +370,9 @@ app.delete('/api/transactions/:id', requireAuth, async (req: any, res) => {
   res.status(204).end();
 });
 
-
-/* =========================
-   Monthly overview (DB view)
-   ========================= */
+/* ------------------------------------------------------------------ */
+/* Monthly overview (DB view)                                         */
+/* ------------------------------------------------------------------ */
 
 app.get('/api/overview', requireAuth, async (_req, res) => {
   const month = String((_req as any).query?.month || '');
@@ -335,34 +382,28 @@ app.get('/api/overview', requireAuth, async (_req, res) => {
   res.json(rows);
 });
 
-/* =========================
-   Forecast to Dec 2027
-   ========================= */
+/* ------------------------------------------------------------------ */
+/* Forecast to Dec 2027 (includes planned bills)                      */
+/* ------------------------------------------------------------------ */
 
-// /api/forecast: robust, no DB view required
 app.get('/api/forecast', requireAuth, async (req: any, res) => {
   try {
-    // start key defaults to current UTC month if not provided
     const startKey = String(req.query.start || new Date().toISOString().slice(0,7)); // "YYYY-MM"
     if (!/^\d{4}-\d{2}$/.test(startKey)) {
       return res.status(400).json({ error: 'start must be YYYY-MM' });
     }
 
-    // assumptions required
     const a = await prisma.assumptions.findUnique({ where: { user_id: req.userId } });
     if (!a) return res.status(400).json({ error: 'Set assumptions first (current savings & as_of_date).' });
 
     const toKey = (d: Date) => `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}`;
 
-    // compute month list from max(as_of_date, startKey) through Dec 2027
     const asOf = new Date(Date.UTC(a.as_of_date.getUTCFullYear(), a.as_of_date.getUTCMonth(), 1));
     const startParts = startKey.split('-').map(Number);
     const requested = new Date(Date.UTC(startParts[0], startParts[1]-1, 1));
     const first = requested < asOf ? asOf : requested;
     const end = new Date(Date.UTC(2027, 11, 1)); // Dec 2027
 
-    // Query aggregates per month via SQL (safe, no custom view needed)
-    // Income per month
     const incRows: { month_key: string; cents: bigint }[] = await prisma.$queryRaw`
       SELECT to_char(date, 'YYYY-MM') AS month_key, SUM(amount_cents)::bigint AS cents
       FROM "app"."income"
@@ -370,7 +411,6 @@ app.get('/api/forecast', requireAuth, async (req: any, res) => {
       GROUP BY 1
     `;
 
-    // Spending per month (transactions)
     const spendRows: { month_key: string; cents: bigint }[] = await prisma.$queryRaw`
       SELECT to_char(date, 'YYYY-MM') AS month_key, SUM(amount_cents)::bigint AS cents
       FROM "app"."transactions"
@@ -384,39 +424,49 @@ app.get('/api/forecast', requireAuth, async (req: any, res) => {
     const spendByMonth = new Map<string, number>();
     for (const r of spendRows) spendByMonth.set(r.month_key, Number(r.cents));
 
-    // Walk months and build the forecast from assumptions.current_savings_cents
+    // 👇 include planned bills for forecast horizon
+    const billsPlanByMonth = await buildBillsPlanByMonth(req.userId, first, end);
+
     const out: { month_key: string; net_change_cents: number; savings_cents: number }[] = [];
     let running = a.current_savings_cents;
 
     let cursor = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), 1));
     while (cursor <= end) {
       const key = toKey(cursor);
-      const inc  = incomeByMonth.get(key) ?? 0;
-      const exp  = spendByMonth.get(key) ?? 0;
-      const net  = inc - exp; // cents
-      running += net;
+      const inc = incomeByMonth.get(key) ?? 0;
+
+      const actualSpend  = spendByMonth.get(key) ?? 0;
+      const plannedBills = billsPlanByMonth.get(key) ?? 0;
+
+      const now = new Date();
+      const isPastMonth =
+        cursor.getUTCFullYear() <  now.getUTCFullYear() ||
+        (cursor.getUTCFullYear() === now.getUTCFullYear() &&
+         cursor.getUTCMonth()    <  now.getUTCMonth());
+
+      // Past = actuals; Current/Future = ensure bills at minimum (no double count)
+      const spend = isPastMonth ? actualSpend : Math.max(actualSpend, plannedBills);
+
+      const net  = inc - spend;
+      running   += net;
       out.push({ month_key: key, net_change_cents: net, savings_cents: running });
+
       cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth()+1, 1));
     }
 
     res.json(out);
   } catch (e: any) {
-    // If something DB-specific goes wrong, don’t leak raw error; give a stable message.
     res.status(500).json({ error: 'Failed to build forecast' });
   }
 });
 
+/* ------------------------------------------------------------------ */
+/* Bills (recurring)                                                  */
+/* ------------------------------------------------------------------ */
 
-/* =========================
-   Bills (recurring)
-   ========================= */
-
-// GET /api/bills
-// default: only 'bill'; override with ?type=subscription or ?type=all
 app.get('/api/bills', requireAuth, async (req: any, res) => {
   try {
     const qType = String(req.query.type || 'bill'); // 'bill' | 'subscription' | 'all'
-
     const where =
       qType === 'all'
         ? { user_id: req.userId }
@@ -432,7 +482,6 @@ app.get('/api/bills', requireAuth, async (req: any, res) => {
   }
 });
 
-// Strict subscriptions endpoint (nice for the Subscriptions page)
 app.get('/api/subscriptions', requireAuth, async (req: any, res) => {
   const rows = await prisma.bills.findMany({
     where: { user_id: req.userId, type: 'subscription' },
@@ -441,9 +490,7 @@ app.get('/api/subscriptions', requireAuth, async (req: any, res) => {
   res.json(rows);
 });
 
-// POST /api/bills — now validates and accepts `type`
 app.post('/api/bills', requireAuth, async (req: any, res) => {
-  // validate everything except userId
   const parsed = billCreateSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });
@@ -453,7 +500,7 @@ app.post('/api/bills', requireAuth, async (req: any, res) => {
   try {
     const row = await prisma.bills.create({
       data: {
-        user_id: req.userId,      // ✅ comes from auth middleware
+        user_id: req.userId,
         name: d.name,
         amount_cents: d.amount_cents,
         cadence: d.cadence,
@@ -480,7 +527,6 @@ app.delete('/api/bills/:id', requireAuth, async (req: any, res) => {
   res.json({ ok: true });
 });
 
-// Update the type of a bill (e.g., mark subscription back to bill)
 app.patch('/api/bills/:id', requireAuth, async (req: any, res) => {
   const { type } = req.body;
   if (type !== 'bill' && type !== 'subscription') {
@@ -500,18 +546,16 @@ app.patch('/api/bills/:id', requireAuth, async (req: any, res) => {
   }
 });
 
-
-
-/* =========================
-   Monthly totals for dashboard tiles
-   ========================= */
+/* ------------------------------------------------------------------ */
+/* Monthly totals for dashboard tiles (includes planned bills)        */
+/* ------------------------------------------------------------------ */
 
 app.get('/api/summary', requireAuth, async (req: any, res) => {
   try {
     const month = String(req.query.month || '');
     const { start, end } = monthRange(month);
 
-    const [inc, spend] = await Promise.all([
+    const [incAgg, spendAgg, billsPlanMap] = await Promise.all([
       prisma.income.aggregate({
         _sum: { amount_cents: true },
         where: { user_id: req.userId, date: { gte: start, lt: end } }
@@ -519,17 +563,35 @@ app.get('/api/summary', requireAuth, async (req: any, res) => {
       prisma.transactions.aggregate({
         _sum: { amount_cents: true },
         where: { user_id: req.userId, date: { gte: start, lt: end } }
-      })
+      }),
+      buildBillsPlanByMonth(
+        req.userId,
+        start,
+        new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 1)) // inclusive month window
+      )
     ]);
 
-    const incomeCents = inc._sum.amount_cents ?? 0;
-    const spendCents  = spend._sum.amount_cents ?? 0;
+    const incomeCents       = Number(incAgg._sum.amount_cents ?? 0);
+    const actualSpendCents  = Number(spendAgg._sum.amount_cents ?? 0);
+    const key               = `${start.getUTCFullYear()}-${String(start.getUTCMonth()+1).padStart(2,'0')}`;
+    const plannedBillsCents = billsPlanMap.get(key) ?? 0;
+
+    // Past months: actuals; current/future: ensure bills are represented
+    const now = new Date();
+    const isPastMonth =
+      start.getUTCFullYear() <  now.getUTCFullYear() ||
+      (start.getUTCFullYear() === now.getUTCFullYear() &&
+       start.getUTCMonth()    <  now.getUTCMonth());
+
+    const spendingCents = isPastMonth
+      ? actualSpendCents
+      : Math.max(actualSpendCents, plannedBillsCents);
 
     res.json({
       month,
-      income: incomeCents / 100,
-      spending: spendCents / 100,
-      net: (incomeCents - spendCents) / 100
+      income:   incomeCents   / 100,
+      spending: spendingCents / 100,
+      net:      (incomeCents - spendingCents) / 100
     });
   } catch (e: any) {
     const status = e?.status ?? 500;
