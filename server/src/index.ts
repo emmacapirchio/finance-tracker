@@ -581,7 +581,11 @@ app.get('/api/summary', requireAuth, async (req: any, res) => {
         where: { user_id: req.userId, date: { gte: start, lt: end } }
       }),
       // Compute planned bills just for this month window
-      buildBillsPlanByMonth(req.userId, start, start)
+      buildBillsPlanByMonth(
+        req.userId,
+        start,
+        new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0, 23, 59, 59))
+      )
     ]);
 
     const incomeCents       = Number(incAgg._sum.amount_cents ?? 0);
