@@ -568,8 +568,9 @@ app.get('/api/summary', requireAuth, async (req: any, res) => {
   try {
     const debug = String(req.query.debug || '') === '1';
     const month = String(req.query.month || '');
-    const { start, end } = monthRange(month);
+    const { start, end } = monthRange(month); // start = 1st of month (UTC), end = 1st of next month
 
+    // Only build the plan for THIS month to avoid off-by-one confusion
     const [incAgg, spendAgg, billsPlanMap] = await Promise.all([
       prisma.income.aggregate({
         _sum: { amount_cents: true },
@@ -579,11 +580,8 @@ app.get('/api/summary', requireAuth, async (req: any, res) => {
         _sum: { amount_cents: true },
         where: { user_id: req.userId, date: { gte: start, lt: end } }
       }),
-      buildBillsPlanByMonth(
-        req.userId,
-        start,
-        new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 1)) // inclusive month window
-      )
+      // Compute planned bills just for this month window
+      buildBillsPlanByMonth(req.userId, start, start)
     ]);
 
     const incomeCents       = Number(incAgg._sum.amount_cents ?? 0);
@@ -591,7 +589,7 @@ app.get('/api/summary', requireAuth, async (req: any, res) => {
     const key               = `${start.getUTCFullYear()}-${String(start.getUTCMonth()+1).padStart(2,'0')}`;
     const plannedBillsCents = billsPlanMap.get(key) ?? 0;
 
-    // Past months: actuals; current/future: ensure bills are represented
+    // Past months: show actuals; current/future: ensure planned bills at minimum
     const now = new Date();
     const isPastMonth =
       start.getUTCFullYear() <  now.getUTCFullYear() ||
@@ -602,17 +600,28 @@ app.get('/api/summary', requireAuth, async (req: any, res) => {
       ? actualSpendCents
       : Math.max(actualSpendCents, plannedBillsCents);
 
-    res.json({
+    const payload: any = {
       month,
       income:   incomeCents   / 100,
       spending: spendingCents / 100,
-      net:      (incomeCents - spendingCents) / 100
-    });
+      net:      (incomeCents - spendingCents) / 100,
+    };
+
+    if (debug) {
+      payload._debug = {
+        actualSpendCents,
+        plannedBillsCents,
+        picked: isPastMonth ? 'actual' : 'max(actual, planned)',
+      };
+    }
+
+    res.json(payload);
   } catch (e: any) {
     const status = e?.status ?? 500;
     res.status(status).json({ error: e?.message || 'Failed to load summary' });
   }
 });
+
 
 const port = Number(process.env.PORT || 4000);
 app.use(errorHandler);
