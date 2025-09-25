@@ -388,6 +388,7 @@ app.get('/api/overview', requireAuth, async (_req, res) => {
 
 app.get('/api/forecast', requireAuth, async (req: any, res) => {
   try {
+    const debug = String(req.query.debug || '') === '1'; // DEBUG
     const startKey = String(req.query.start || new Date().toISOString().slice(0,7)); // "YYYY-MM"
     if (!/^\d{4}-\d{2}$/.test(startKey)) {
       return res.status(400).json({ error: 'start must be YYYY-MM' });
@@ -431,6 +432,8 @@ app.get('/api/forecast', requireAuth, async (req: any, res) => {
     let running = a.current_savings_cents;
 
     let cursor = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), 1));
+    const debugRows: any[] = []; // DEBUG
+
     while (cursor <= end) {
       const key = toKey(cursor);
       const inc = incomeByMonth.get(key) ?? 0;
@@ -451,6 +454,13 @@ app.get('/api/forecast', requireAuth, async (req: any, res) => {
       running   += net;
       out.push({ month_key: key, net_change_cents: net, savings_cents: running });
 
+      // DEBUG
+      if (debug) {
+        debugRows.push({
+          key, isPastMonth, inc, actualSpend, plannedBills, chosenSpend: spend, net
+        });
+      }
+      
       cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth()+1, 1));
     }
 
@@ -552,6 +562,7 @@ app.patch('/api/bills/:id', requireAuth, async (req: any, res) => {
 
 app.get('/api/summary', requireAuth, async (req: any, res) => {
   try {
+    const debug = String(req.query.debug || '') === '1';
     const month = String(req.query.month || '');
     const { start, end } = monthRange(month);
 
