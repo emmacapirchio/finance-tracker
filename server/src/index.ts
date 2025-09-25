@@ -47,9 +47,92 @@ app.use(cookieParser());
 /* ------------------------------------------------------------------ */
 
 // month key
+// --- helper: month key (UTC) ---
 function monthKeyUTC(d: Date) {
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}`;
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }
+
+/** Return a Map<YYYY-MM, cents> with planned bills for each month in [first..endIncl]. */
+async function buildBillsPlanByMonth(userId: string, first: Date, endIncl: Date) {
+  // 1) Fetch all user bills; do overlap checks in JS so NULLs are easy
+  const bills = await prisma.bills.findMany({
+    where: { user_id: userId },
+    select: {
+      id: true,
+      name: true,
+      cadence: true,
+      amount_cents: true,
+      start_date: true,
+      end_date: true,
+    },
+  });
+
+  const plan = new Map<string, number>();
+
+  // cadence → monthly factor (approx for weekly/biweekly/annual/quarterly)
+  const factor: Record<string, number> = {
+    weekly: 52 / 12,
+    biweekly: 26 / 12,
+    monthly: 1,
+    quarterly: 1 / 3,
+    annual: 1 / 12,
+    once: 0, // handled specially
+  };
+
+  // 2) Iterate each month in the window, inclusive
+  let cursor = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), 1));
+  while (cursor <= endIncl) {
+    const key = monthKeyUTC(cursor);
+    const monthStart = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), 1));
+    const monthEnd   = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 0, 23, 59, 59)); // inclusive EOM
+
+    let cents = 0;
+
+    for (const b of bills) {
+      const amt = Number(b.amount_cents) || 0;
+
+      // Is bill active this month? (null start = always active from beginning; null end = open-ended)
+      const startsBy = b.start_date ?? monthEnd;   // if null, treat as already started
+      const endsOn   = b.end_date   ?? monthEnd;   // if null, treat as still active
+
+      const overlaps =
+        (b.start_date == null || startsBy <= monthEnd) &&
+        (b.end_date   == null || endsOn   >= monthStart);
+
+      if (!overlaps) continue;
+
+      switch (b.cadence) {
+        case 'monthly':
+        case 'weekly':
+        case 'biweekly':
+        case 'quarterly':
+        case 'annual':
+          cents += Math.round(amt * (factor[b.cadence] ?? 1));
+          break;
+
+        case 'once': {
+          // For a one-off, count only in its start_date month
+          if (b.start_date &&
+              b.start_date.getUTCFullYear() === monthStart.getUTCFullYear() &&
+              b.start_date.getUTCMonth()    === monthStart.getUTCMonth()) {
+            cents += amt;
+          }
+          break;
+        }
+
+        default:
+          // Fallback: treat as monthly
+          cents += amt;
+      }
+    }
+
+    plan.set(key, cents);
+    cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1));
+  }
+
+  return plan;
+}
+
 
 // strict month range from "YYYY-MM"
 function monthRange(yyyyMm: string) {
@@ -63,64 +146,6 @@ function monthRange(yyyyMm: string) {
   const start = new Date(Date.UTC(y, m - 1, 1));
   const end   = new Date(Date.UTC(m === 12 ? y + 1 : y, m === 12 ? 0 : m, 1));
   return { start, end };
-}
-
-// build "planned bills" per month without writing rows
-async function buildBillsPlanByMonth(userId: string, first: Date, end: Date) {
-  const bills = await prisma.bills.findMany({
-    where: {
-      user_id: userId,
-      OR: [{ start_date: null }, { start_date: { lte: end } }],
-      AND: [{ end_date: null }, { end_date: { gte: first } }],
-    },
-  });
-
-  const plan = new Map<string, number>();
-  const factor: Record<string, number> = {
-    weekly:    52 / 12,
-    biweekly:  26 / 12,
-    monthly:    1,
-    quarterly:  1 / 3,
-    annual:     1 / 12,
-    once:       0, // special-case below
-  };
-
-  let cursor = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth(), 1));
-  while (cursor <= end) {
-    const key = monthKeyUTC(cursor);
-    let cents = 0;
-
-    for (const b of bills) {
-      const startOk = !b.start_date || b.start_date <= new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth()+1, 0, 23, 59, 59));
-      const endOk   = !b.end_date   || b.end_date   >= new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth(), 1));
-      if (!startOk || !endOk) continue;
-
-      const amt = Number(b.amount_cents) || 0;
-      switch (b.cadence) {
-        case 'weekly':
-        case 'biweekly':
-        case 'monthly':
-        case 'quarterly':
-        case 'annual':
-          cents += Math.round(amt * factor[b.cadence]);
-          break;
-        case 'once':
-          if (b.start_date &&
-              b.start_date.getUTCFullYear() === cursor.getUTCFullYear() &&
-              b.start_date.getUTCMonth()    === cursor.getUTCMonth()) {
-            cents += amt;
-          }
-          break;
-        default:
-          cents += amt; // fallback to monthly
-      }
-    }
-
-    plan.set(key, cents);
-    cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth()+1, 1));
-  }
-
-  return plan;
 }
 
 // validator for bills creation
